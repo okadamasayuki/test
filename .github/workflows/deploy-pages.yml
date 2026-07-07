@@ -23,6 +23,10 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - name: CSS/JSにバージョンを付与してキャッシュを無効化
+        run: |
+          V="${GITHUB_SHA::7}"
+          sed -i "s|href=\"style.css\"|href=\"style.css?v=$V\"|; s|src=\"app.js\"|src=\"app.js?v=$V\"|; s|src=\"firebase-config.js\"|src=\"firebase-config.js?v=$V\"|" index.html
       - uses: actions/configure-pages@v5
         with:
           enablement: true
