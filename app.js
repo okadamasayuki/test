@@ -252,8 +252,9 @@
     else memo.due = ts;
     memo.updatedAt = Date.now();
     delete memo.sample;
-    save();
     pushMemo(memo);
+    if (ts !== null) resortByDue(); // 期日登録時は期日順に整列し直す
+    save();
     render();
   }
 
@@ -267,8 +268,13 @@
     return typeof m.order === "number" ? m.order : -m.updatedAt;
   }
 
-  // 期日ありのメモは期日が近い順で先頭に集め、期日なしは従来の並びで続ける
   function sortedMemos() {
+    return visibleMemos().sort((a, b) => sortKey(a) - sortKey(b));
+  }
+
+  // 期日を登録したタイミングで、期日ありを期日が近い順に先頭へ並べ直す
+  // （その後のドラッグでの手動並び替えは自由にできる）
+  function resortByDue() {
     const list = visibleMemos();
     const withDue = list
       .filter((m) => typeof m.due === "number")
@@ -276,7 +282,13 @@
     const rest = list
       .filter((m) => typeof m.due !== "number")
       .sort((a, b) => sortKey(a) - sortKey(b));
-    return [...withDue, ...rest];
+    [...withDue, ...rest].forEach((m, i) => {
+      if (m.order !== i) {
+        m.order = i;
+        m.updatedAt = Date.now();
+        pushMemo(m);
+      }
+    });
   }
 
   function filteredMemos() {
@@ -433,8 +445,7 @@
     let changed = false;
     ids.forEach((id, i) => {
       const m = getMemo(id);
-      // 期日ありのメモは期日順で自動配置されるため手動orderは触らない
-      if (m && typeof m.due !== "number" && m.order !== i) {
+      if (m && m.order !== i) {
         m.order = i;
         m.updatedAt = Date.now(); // 他端末へ並び順の変更を伝えるため
         pushMemo(m);
@@ -657,8 +668,7 @@
         memoList.appendChild(
           buildRow({
             id: m.id,
-            // 期日ありは期日順で自動配置されるためドラッグ対象外
-            draggable: canDrag && typeof m.due !== "number",
+            draggable: canDrag,
             chip: dueChip(m.due),
             titleText: m.title.trim() || "無題のメモ",
             previewText: m.body.trim().split("\n")[0] || "本文なし",
