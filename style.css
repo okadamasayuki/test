@@ -477,6 +477,10 @@ body {
   .sidebar { width: 100%; height: 45%; border-right: none; border-bottom: 1px solid var(--border); }
   .editor { height: 55%; }
   .editor-pane { padding: 16px; }
+
+  /* 何も選択していない時は案内エリアを出さず、一覧を全画面にする */
+  body.no-editor .sidebar { height: 100%; border-bottom: none; }
+  body.no-editor .editor { display: none; }
 }
 
 @media (prefers-color-scheme: dark) {

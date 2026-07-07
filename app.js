@@ -435,6 +435,10 @@
   }
 
   function renderEditor() {
+    // スマホでは編集対象がない時にエディタ領域ごと隠し、一覧を全画面にする
+    const showEditor = currentTab === "memos" && !!getMemo(selectedId);
+    document.body.classList.toggle("no-editor", !showEditor);
+
     if (currentTab === "files") {
       editorPane.hidden = true;
       emptyState.hidden = false;
