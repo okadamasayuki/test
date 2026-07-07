@@ -1412,8 +1412,21 @@
     if (v === "custom") {
       // 日付入力を出すだけ。日付が選ばれた時点で確定する
       dueDate.hidden = false;
-      if (dueDate.value) setDue(endOfDay(new Date(dueDate.value + "T00:00:00")));
-      else if (dueDate.showPicker) dueDate.showPicker();
+      if (dueDate.value) {
+        setDue(endOfDay(new Date(dueDate.value + "T00:00:00")));
+      } else {
+        // 表示直後はレイアウト未確定でカレンダーが左上に出るため、
+        // 位置が決まってから開く
+        dueDate.getBoundingClientRect();
+        requestAnimationFrame(() => {
+          try {
+            if (dueDate.showPicker) dueDate.showPicker();
+            else dueDate.focus();
+          } catch (err) {
+            dueDate.focus();
+          }
+        });
+      }
     } else if (v === "") {
       setDue(null);
     } else {
