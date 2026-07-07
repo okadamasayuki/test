@@ -12,7 +12,10 @@
     <aside class="sidebar">
       <div class="sidebar-header">
         <h1>メモ帳</h1>
-        <button id="newBtn" class="new-btn" title="新しいメモ">+ 新規</button>
+        <div class="header-btns">
+          <button id="syncBtn" class="icon-btn" title="同期設定">⚙</button>
+          <button id="newBtn" class="new-btn" title="新しいメモ">+ 新規</button>
+        </div>
       </div>
       <div class="search-box">
         <input type="search" id="searchInput" placeholder="メモを検索…" autocomplete="off">
@@ -20,6 +23,7 @@
       <ul id="memoList" class="memo-list"></ul>
       <div class="sidebar-footer">
         <span id="countLabel"></span>
+        <span id="syncLabel" class="sync-label"></span>
       </div>
     </aside>
 
@@ -36,6 +40,29 @@
         </div>
       </div>
     </main>
+  </div>
+
+  <div id="syncModal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <h2>端末間の同期設定</h2>
+      <p class="modal-desc">
+        GitHubの非公開Gistにメモを保存して、スマホやPCなど複数の端末で同期します。<br>
+        <a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=memo-app-sync" target="_blank" rel="noopener">こちらのページ</a>で「gist」スコープのアクセストークン（classic）を作成し、下に貼り付けてください。<br>
+        2台目以降の端末では、同じトークンを貼るだけで自動的に繋がります。
+      </p>
+      <label class="modal-label">
+        アクセストークン
+        <input type="password" id="tokenInput" placeholder="ghp_..." autocomplete="off">
+      </label>
+      <p id="syncModalStatus" class="modal-status"></p>
+      <div class="modal-actions">
+        <button id="syncDisconnectBtn" class="modal-btn">同期を解除</button>
+        <span class="modal-actions-right">
+          <button id="syncCloseBtn" class="modal-btn">閉じる</button>
+          <button id="syncConnectBtn" class="modal-btn primary">接続</button>
+        </span>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>
