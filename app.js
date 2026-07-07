@@ -374,16 +374,49 @@
     renderList();
   }
 
+  // 行を入れ替える際、他の行が滑らかに場所を空けるアニメーション(FLIP)
+  function moveRowWithFlip(li, after) {
+    const rows = [...memoList.children].filter(
+      (el) => el !== li && el.classList.contains("memo-item")
+    );
+    const before = new Map(rows.map((el) => [el, el.getBoundingClientRect().top]));
+    if (after) memoList.insertBefore(li, after);
+    else memoList.appendChild(li);
+    for (const el of rows) {
+      const d = before.get(el) - el.getBoundingClientRect().top;
+      if (d) {
+        el.style.transition = "none";
+        el.style.transform = `translateY(${d}px)`;
+        requestAnimationFrame(() => {
+          el.style.transition = "transform 0.18s ease";
+          el.style.transform = "";
+        });
+      }
+    }
+  }
+
   function attachDragHandle(handle, li) {
     handle.addEventListener("pointerdown", (e) => {
       e.preventDefault();
       e.stopPropagation();
       draggingRow = true;
-      li.classList.add("dragging");
+
+      // つかんだ行の「浮いた」分身を作り、指に追従させる
+      const rect = li.getBoundingClientRect();
+      const grabDy = e.clientY - rect.top;
+      const ghost = li.cloneNode(true);
+      ghost.className = "memo-item drag-ghost";
+      ghost.style.left = rect.left + "px";
+      ghost.style.top = rect.top + "px";
+      ghost.style.width = rect.width + "px";
+      document.body.appendChild(ghost);
+      requestAnimationFrame(() => ghost.classList.add("lifted"));
+      li.classList.add("drag-source"); // 元の位置は半透明のプレースホルダーに
 
       // 行のDOM移動でポインター捕捉が途切れることがあるため、
       // move/upはwindow側で受ける
       const move = (ev) => {
+        ghost.style.top = ev.clientY - grabDy + "px";
         const y = ev.clientY;
         const others = [...memoList.children].filter(
           (el) => el !== li && el.classList.contains("memo-item")
@@ -397,16 +430,17 @@
           }
         }
         if (after) {
-          if (after.previousElementSibling !== li) memoList.insertBefore(li, after);
+          if (after.previousElementSibling !== li) moveRowWithFlip(li, after);
         } else if (memoList.lastElementChild !== li) {
-          memoList.appendChild(li);
+          moveRowWithFlip(li, null);
         }
       };
       const up = () => {
         window.removeEventListener("pointermove", move);
         window.removeEventListener("pointerup", up);
         window.removeEventListener("pointercancel", up);
-        li.classList.remove("dragging");
+        ghost.remove();
+        li.classList.remove("drag-source");
         draggingRow = false;
         commitOrder();
       };

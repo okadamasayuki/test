@@ -191,11 +191,43 @@ body {
   cursor: grabbing;
 }
 
-.memo-item.dragging {
-  opacity: 0.75;
+/* ドラッグ中: 元の行は薄いプレースホルダーになる（背後の削除ボタンは隠す） */
+.memo-item.drag-source .memo-swipe-content {
+  background: var(--bg);
 }
-.memo-item.dragging .memo-swipe-content {
-  background: var(--selected);
+.memo-item.drag-source .memo-title,
+.memo-item.drag-source .memo-preview,
+.memo-item.drag-source .memo-date,
+.memo-item.drag-source .drag-handle {
+  opacity: 0.3;
+}
+.memo-item.drag-source .memo-delete-btn {
+  display: none;
+}
+
+/* 指に追従する「浮いた」分身 */
+.memo-item.drag-ghost {
+  position: fixed;
+  z-index: 100;
+  list-style: none;
+  margin: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--sidebar-bg);
+  border-bottom: none;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+  pointer-events: none;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.memo-item.drag-ghost.lifted {
+  transform: scale(1.03);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.32);
+}
+.memo-item.drag-ghost .memo-swipe-content {
+  background: var(--sidebar-bg);
+}
+.memo-item.drag-ghost .memo-delete-btn {
+  display: none;
 }
 
 .memo-list.select-mode .memo-swipe-content {
