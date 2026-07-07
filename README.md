@@ -24,11 +24,13 @@ Firebaseを設定するとGoogleログインで複数端末のリアルタイム
 1. https://console.firebase.google.com を開き「プロジェクトを作成」
 2. プロジェクト名は自由（例: `memo-app`）。Google アナリティクスは無効でOK
 
-### 2. Googleログインを有効化
+### 2. ログイン方法を有効化
 
 1. 左メニュー「構築」→「Authentication」→「始める」
 2. 「Sign-in method」タブ →「Google」を選んで有効化 → 保存
-3. 「Settings」タブ →「承認済みドメイン」に `okadamasayuki.github.io` を追加
+3. 同じく「メール / パスワード」を選んで有効化 → 保存
+   （メールアドレスでの新規登録・ログインに必要）
+4. 「Settings」タブ →「承認済みドメイン」に `okadamasayuki.github.io` を追加
 
 ### 3. Firestoreデータベースを作成
 

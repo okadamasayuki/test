@@ -60,10 +60,24 @@
       </div>
       <div id="syncLoginView" hidden>
         <p class="modal-desc">
-          Googleアカウントでログインすると、メモがあなた専用の領域に保存され、
+          ログインすると、メモとファイルがあなた専用の領域に保存され、
           スマホやPCなど複数の端末でリアルタイムに同期されます。
         </p>
-        <button id="loginBtn" class="modal-btn primary">Googleでログイン</button>
+        <label class="modal-label">
+          メールアドレス
+          <input type="email" id="emailInput" autocomplete="email" placeholder="you@example.com">
+        </label>
+        <label class="modal-label">
+          パスワード
+          <input type="password" id="passwordInput" autocomplete="current-password" placeholder="6文字以上">
+        </label>
+        <div class="auth-btns">
+          <button id="signupBtn" class="modal-btn">新規登録</button>
+          <button id="emailLoginBtn" class="modal-btn primary">ログイン</button>
+        </div>
+        <div class="auth-divider">または</div>
+        <button id="loginBtn" class="modal-btn google-btn">Googleでログイン</button>
+        <p class="modal-reset"><a href="#" id="resetLink">パスワードを忘れた場合（リセットメールを送る）</a></p>
       </div>
       <div id="syncUserView" hidden>
         <p class="modal-desc">

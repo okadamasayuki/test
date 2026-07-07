@@ -53,6 +53,11 @@
   const userLabel = document.getElementById("userLabel");
   const loginBtn = document.getElementById("loginBtn");
   const logoutBtn = document.getElementById("logoutBtn");
+  const emailInput = document.getElementById("emailInput");
+  const passwordInput = document.getElementById("passwordInput");
+  const signupBtn = document.getElementById("signupBtn");
+  const emailLoginBtn = document.getElementById("emailLoginBtn");
+  const resetLink = document.getElementById("resetLink");
   const syncModalStatus = document.getElementById("syncModalStatus");
   const syncCloseBtn = document.getElementById("syncCloseBtn");
 
@@ -755,6 +760,9 @@
         signInWithPopup: authMod.signInWithPopup,
         GoogleAuthProvider: authMod.GoogleAuthProvider,
         signOut: authMod.signOut,
+        createUserWithEmailAndPassword: authMod.createUserWithEmailAndPassword,
+        signInWithEmailAndPassword: authMod.signInWithEmailAndPassword,
+        sendPasswordResetEmail: authMod.sendPasswordResetEmail,
       };
       authMod.onAuthStateChanged(fb.auth, (u) => {
         user = u;
@@ -794,6 +802,29 @@
     syncModal.hidden = true;
   }
 
+  function authErrMsg(e) {
+    switch (e && e.code) {
+      case "auth/invalid-email":
+        return "メールアドレスの形式が正しくありません。";
+      case "auth/email-already-in-use":
+        return "このメールアドレスは登録済みです。「ログイン」をお試しください。";
+      case "auth/weak-password":
+        return "パスワードは6文字以上にしてください。";
+      case "auth/user-not-found":
+      case "auth/wrong-password":
+      case "auth/invalid-credential":
+        return "メールアドレスまたはパスワードが違います。";
+      case "auth/too-many-requests":
+        return "試行回数が多すぎます。しばらく待ってからお試しください。";
+      case "auth/operation-not-allowed":
+        return "この方式のログインが有効化されていません（Firebaseコンソールの設定が必要です）。";
+      case "auth/popup-blocked":
+        return "ポップアップがブロックされました。許可して再度お試しください。";
+      default:
+        return (e && e.message) || String(e);
+    }
+  }
+
   async function onLoginClick() {
     if (!fb) return;
     syncModalStatus.textContent = "ログインしています…";
@@ -801,11 +832,57 @@
       await fb.signInWithPopup(fb.auth, new fb.GoogleAuthProvider());
       syncModalStatus.textContent = "ログインしました。同期が有効です。";
     } catch (e) {
-      syncModalStatus.textContent =
-        "ログインに失敗しました: " +
-        (e.code === "auth/popup-blocked"
-          ? "ポップアップがブロックされました。許可して再度お試しください。"
-          : e.message || e);
+      syncModalStatus.textContent = "ログインに失敗しました: " + authErrMsg(e);
+    }
+  }
+
+  async function onSignupClick() {
+    if (!fb) return;
+    const email = emailInput.value.trim();
+    const pw = passwordInput.value;
+    if (!email || !pw) {
+      syncModalStatus.textContent = "メールアドレスとパスワードを入力してください。";
+      return;
+    }
+    syncModalStatus.textContent = "登録しています…";
+    try {
+      await fb.createUserWithEmailAndPassword(fb.auth, email, pw);
+      syncModalStatus.textContent = "登録してログインしました。同期が有効です。";
+    } catch (e) {
+      syncModalStatus.textContent = "登録に失敗しました: " + authErrMsg(e);
+    }
+  }
+
+  async function onEmailLoginClick() {
+    if (!fb) return;
+    const email = emailInput.value.trim();
+    const pw = passwordInput.value;
+    if (!email || !pw) {
+      syncModalStatus.textContent = "メールアドレスとパスワードを入力してください。";
+      return;
+    }
+    syncModalStatus.textContent = "ログインしています…";
+    try {
+      await fb.signInWithEmailAndPassword(fb.auth, email, pw);
+      syncModalStatus.textContent = "ログインしました。同期が有効です。";
+    } catch (e) {
+      syncModalStatus.textContent = "ログインに失敗しました: " + authErrMsg(e);
+    }
+  }
+
+  async function onResetClick(e) {
+    e.preventDefault();
+    if (!fb) return;
+    const email = emailInput.value.trim();
+    if (!email) {
+      syncModalStatus.textContent = "リセットするメールアドレスを上に入力してください。";
+      return;
+    }
+    try {
+      await fb.sendPasswordResetEmail(fb.auth, email);
+      syncModalStatus.textContent = `${email} にリセット用メールを送りました。`;
+    } catch (err) {
+      syncModalStatus.textContent = "送信に失敗しました: " + authErrMsg(err);
     }
   }
 
@@ -836,6 +913,9 @@
   syncBtn.addEventListener("click", openModal);
   syncCloseBtn.addEventListener("click", closeModal);
   loginBtn.addEventListener("click", onLoginClick);
+  signupBtn.addEventListener("click", onSignupClick);
+  emailLoginBtn.addEventListener("click", onEmailLoginClick);
+  resetLink.addEventListener("click", onResetClick);
   logoutBtn.addEventListener("click", onLogoutClick);
   syncModal.addEventListener("click", (e) => {
     if (e.target === syncModal) closeModal();
