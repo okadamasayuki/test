@@ -267,8 +267,16 @@
     return typeof m.order === "number" ? m.order : -m.updatedAt;
   }
 
+  // 期日ありのメモは期日が近い順で先頭に集め、期日なしは従来の並びで続ける
   function sortedMemos() {
-    return visibleMemos().sort((a, b) => sortKey(a) - sortKey(b));
+    const list = visibleMemos();
+    const withDue = list
+      .filter((m) => typeof m.due === "number")
+      .sort((a, b) => a.due - b.due || sortKey(a) - sortKey(b));
+    const rest = list
+      .filter((m) => typeof m.due !== "number")
+      .sort((a, b) => sortKey(a) - sortKey(b));
+    return [...withDue, ...rest];
   }
 
   function filteredMemos() {
@@ -425,7 +433,8 @@
     let changed = false;
     ids.forEach((id, i) => {
       const m = getMemo(id);
-      if (m && m.order !== i) {
+      // 期日ありのメモは期日順で自動配置されるため手動orderは触らない
+      if (m && typeof m.due !== "number" && m.order !== i) {
         m.order = i;
         m.updatedAt = Date.now(); // 他端末へ並び順の変更を伝えるため
         pushMemo(m);
@@ -648,7 +657,8 @@
         memoList.appendChild(
           buildRow({
             id: m.id,
-            draggable: canDrag,
+            // 期日ありは期日順で自動配置されるためドラッグ対象外
+            draggable: canDrag && typeof m.due !== "number",
             chip: dueChip(m.due),
             titleText: m.title.trim() || "無題のメモ",
             previewText: m.body.trim().split("\n")[0] || "本文なし",
