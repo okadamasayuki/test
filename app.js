@@ -1162,7 +1162,16 @@
   async function onLogoutClick() {
     if (!fb) return;
     await fb.signOut(fb.auth);
-    syncModalStatus.textContent = "ログアウトしました（メモはこの端末に残ります）。";
+    // 共有端末で他人にメモが見えないよう、この端末のデータは消去する
+    // （クラウド側には残っており、再ログインで復元される）
+    memos = [];
+    selectedId = null;
+    selectMode = false;
+    checkedIds.clear();
+    save();
+    render();
+    syncModalStatus.textContent =
+      "ログアウトし、この端末のメモを消去しました。データはアカウントに残っているので、再ログインすると戻ります。";
   }
 
   // --- Events ---
