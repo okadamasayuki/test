@@ -39,6 +39,7 @@
   const emptyState = document.getElementById("emptyState");
   const emptyStateText = document.getElementById("emptyStateText");
   const editorPane = document.getElementById("editorPane");
+  const backBtn = document.getElementById("backBtn");
   const titleInput = document.getElementById("titleInput");
   const bodyInput = document.getElementById("bodyInput");
   const deleteBtn = document.getElementById("deleteBtn");
@@ -511,8 +512,24 @@
     titleInput.focus();
   }
 
+  function isMobile() {
+    return window.matchMedia("(max-width: 640px)").matches;
+  }
+
   function selectMemo(id) {
+    // スマホではエディタが全画面になるため、ブラウザの「戻る」で一覧に
+    // 戻れるよう履歴を1つ積む（iOSの端からの戻るスワイプにも対応）
+    if (isMobile() && !(history.state && history.state.memoOpen)) {
+      history.pushState({ memoOpen: true }, "");
+    }
     selectedId = id;
+    render();
+  }
+
+  // アプリ内の「戻る」では履歴操作をしない（history.back()の非同期性と
+  // 競合して二重に戻る事故を防ぐ）。積んだ履歴はpopstate側で無害に消費される。
+  function backToList() {
+    selectedId = null;
     render();
   }
 
@@ -1013,6 +1030,48 @@
       createMemo();
     }
   });
+
+  // --- スマホ: エディタから一覧へ戻る ---
+  backBtn.addEventListener("click", backToList);
+
+  // ブラウザの「戻る」(iOSの端からのスワイプ含む)で一覧へ
+  window.addEventListener("popstate", () => {
+    if (selectedId) {
+      selectedId = null;
+      render();
+    }
+  });
+
+  // エディタ内を右にスワイプしたら一覧へ戻る
+  (function attachEditorBackSwipe() {
+    let sx = 0;
+    let sy = 0;
+    let mode = null; // null | "back" | "scroll"
+    editorPane.addEventListener(
+      "touchstart",
+      (e) => {
+        sx = e.touches[0].clientX;
+        sy = e.touches[0].clientY;
+        mode = null;
+      },
+      { passive: true }
+    );
+    editorPane.addEventListener(
+      "touchmove",
+      (e) => {
+        if (mode || !isMobile()) return;
+        const dx = e.touches[0].clientX - sx;
+        const dy = e.touches[0].clientY - sy;
+        if (dx > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+          mode = "back";
+          backToList();
+        } else if (Math.abs(dy) > 30) {
+          mode = "scroll";
+        }
+      },
+      { passive: true }
+    );
+  })();
 
   // --- Init ---
   render();
