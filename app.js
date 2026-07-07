@@ -404,7 +404,8 @@
 
   function updateSelectBar() {
     selectBar.hidden = !selectMode;
-    selectBtn.textContent = selectMode ? "キャンセル" : "選択";
+    selectBtn.textContent = selectMode ? "✕" : "☑";
+    selectBtn.title = selectMode ? "選択をキャンセル" : "選択して一括削除";
     selectBtn.classList.toggle("active", selectMode);
     memoList.classList.toggle("select-mode", selectMode);
     if (!selectMode) return;
