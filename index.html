@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>メモ帳</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h1>メモ帳</h1>
+        <button id="newBtn" class="new-btn" title="新しいメモ">+ 新規</button>
+      </div>
+      <div class="search-box">
+        <input type="search" id="searchInput" placeholder="メモを検索…" autocomplete="off">
+      </div>
+      <ul id="memoList" class="memo-list"></ul>
+      <div class="sidebar-footer">
+        <span id="countLabel"></span>
+      </div>
+    </aside>
+
+    <main class="editor">
+      <div id="emptyState" class="empty-state">
+        <p>メモを選択するか、<br>「+ 新規」で作成してください。</p>
+      </div>
+      <div id="editorPane" class="editor-pane" hidden>
+        <input type="text" id="titleInput" class="title-input" placeholder="タイトル">
+        <textarea id="bodyInput" class="body-input" placeholder="ここに本文を入力…"></textarea>
+        <div class="editor-footer">
+          <span id="savedLabel" class="saved-label"></span>
+          <button id="deleteBtn" class="delete-btn">削除</button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
