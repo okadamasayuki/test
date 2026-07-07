@@ -173,10 +173,97 @@
     return list;
   }
 
+  // --- スワイプで削除 ---
+  const SWIPE_W = 80; // 削除ボタンの幅(px)
+  let openSwipeEl = null;
+
+  function closeOpenSwipe() {
+    if (openSwipeEl) {
+      openSwipeEl.style.transform = "";
+      openSwipeEl = null;
+    }
+  }
+
+  function attachSwipe(content, memoId) {
+    let active = false;
+    let startX = 0;
+    let startY = 0;
+    let base = 0;
+    let mode = null; // null | "swipe" | "scroll"
+    let dragged = false;
+
+    content.addEventListener("pointerdown", (e) => {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      active = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      base = openSwipeEl === content ? -SWIPE_W : 0;
+      mode = null;
+      dragged = false;
+    });
+
+    content.addEventListener("pointermove", (e) => {
+      if (!active) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      if (mode === null) {
+        // 横方向の動きが優勢な時だけスワイプ扱いにし、縦スクロールは邪魔しない
+        if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) {
+          mode = "swipe";
+          content.setPointerCapture(e.pointerId);
+          content.style.transition = "none";
+        } else if (Math.abs(dy) > 8) {
+          mode = "scroll";
+        }
+      }
+      if (mode === "swipe") {
+        dragged = true;
+        const off = Math.max(-SWIPE_W, Math.min(0, base + dx));
+        content.style.transform = `translateX(${off}px)`;
+      }
+    });
+
+    const finish = (e) => {
+      if (!active) return;
+      active = false;
+      if (mode === "swipe") {
+        content.style.transition = "";
+        const off = base + (e.clientX - startX);
+        if (off < -SWIPE_W / 2) {
+          if (openSwipeEl && openSwipeEl !== content) closeOpenSwipe();
+          content.style.transform = `translateX(-${SWIPE_W}px)`;
+          openSwipeEl = content;
+        } else {
+          content.style.transform = "";
+          if (openSwipeEl === content) openSwipeEl = null;
+        }
+      }
+      mode = null;
+    };
+    content.addEventListener("pointerup", finish);
+    content.addEventListener("pointercancel", finish);
+
+    content.addEventListener("click", (e) => {
+      if (dragged) {
+        // スワイプ直後のクリックは選択扱いにしない
+        dragged = false;
+        e.stopPropagation();
+        return;
+      }
+      if (openSwipeEl) {
+        const wasSelf = openSwipeEl === content;
+        closeOpenSwipe();
+        if (wasSelf) return;
+      }
+      selectMemo(memoId);
+    });
+  }
+
   // --- Rendering ---
   function renderList() {
     const list = filteredMemos();
     memoList.innerHTML = "";
+    openSwipeEl = null;
 
     list.forEach((m) => {
       const li = document.createElement("li");
@@ -195,8 +282,20 @@
       date.className = "memo-date";
       date.textContent = formatDate(m.updatedAt);
 
-      li.append(title, preview, date);
-      li.addEventListener("click", () => selectMemo(m.id));
+      const content = document.createElement("div");
+      content.className = "memo-swipe-content";
+      content.append(title, preview, date);
+
+      const del = document.createElement("button");
+      del.className = "memo-delete-btn";
+      del.textContent = "削除";
+      del.addEventListener("click", (e) => {
+        e.stopPropagation();
+        deleteMemoById(m.id);
+      });
+
+      li.append(del, content);
+      attachSwipe(content, m.id);
       memoList.appendChild(li);
     });
 
@@ -288,19 +387,23 @@
     }, 400);
   }
 
-  function deleteSelected() {
-    const memo = getMemo(selectedId);
+  function deleteMemoById(id) {
+    const memo = getMemo(id);
     if (!memo) return;
     const name = memo.title.trim() || "このメモ";
     if (!confirm(`「${name}」を削除しますか？`)) return;
     // 他端末にも削除が伝わるよう、消すのではなく削除済みの印を残す
-    const idx = memos.findIndex((m) => m.id === selectedId);
+    const idx = memos.findIndex((m) => m.id === id);
     const tombstone = { id: memo.id, deleted: true, updatedAt: Date.now() };
     memos[idx] = tombstone;
-    selectedId = null;
+    if (selectedId === id) selectedId = null;
     save();
     pushMemo(tombstone);
     render();
+  }
+
+  function deleteSelected() {
+    deleteMemoById(selectedId);
   }
 
   // --- Firebase同期 ---
