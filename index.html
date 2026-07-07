@@ -45,26 +45,36 @@
   <div id="syncModal" class="modal-backdrop" hidden>
     <div class="modal">
       <h2>端末間の同期設定</h2>
-      <p class="modal-desc">
-        GitHubの非公開Gistにメモを保存して、スマホやPCなど複数の端末で同期します。<br>
-        <a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=memo-app-sync" target="_blank" rel="noopener">こちらのページ</a>で「gist」スコープのアクセストークン（classic）を作成し、下に貼り付けてください。<br>
-        2台目以降の端末では、同じトークンを貼るだけで自動的に繋がります。
-      </p>
-      <label class="modal-label">
-        アクセストークン
-        <input type="password" id="tokenInput" placeholder="ghp_..." autocomplete="off">
-      </label>
+      <div id="syncSetupView" hidden>
+        <p class="modal-desc">
+          Firebaseの設定がまだありません。リポジトリの
+          <a href="https://github.com/okadamasayuki/test#readme" target="_blank" rel="noopener">README</a>
+          の手順でFirebaseプロジェクトを作成し、<code>firebase-config.js</code> を設定すると同期が使えるようになります。
+        </p>
+      </div>
+      <div id="syncLoginView" hidden>
+        <p class="modal-desc">
+          Googleアカウントでログインすると、メモがあなた専用の領域に保存され、
+          スマホやPCなど複数の端末でリアルタイムに同期されます。
+        </p>
+        <button id="loginBtn" class="modal-btn primary">Googleでログイン</button>
+      </div>
+      <div id="syncUserView" hidden>
+        <p class="modal-desc">
+          <strong id="userLabel"></strong> としてログイン中。リアルタイム同期が有効です。<br>
+          他の端末でも同じGoogleアカウントでログインすると繋がります。
+        </p>
+        <button id="logoutBtn" class="modal-btn">ログアウト</button>
+      </div>
       <p id="syncModalStatus" class="modal-status"></p>
       <div class="modal-actions">
-        <button id="syncDisconnectBtn" class="modal-btn">同期を解除</button>
-        <span class="modal-actions-right">
-          <button id="syncCloseBtn" class="modal-btn">閉じる</button>
-          <button id="syncConnectBtn" class="modal-btn primary">接続</button>
-        </span>
+        <span></span>
+        <button id="syncCloseBtn" class="modal-btn">閉じる</button>
       </div>
     </div>
   </div>
 
+  <script src="firebase-config.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -1,14 +1,9 @@
-(function () {
+(async function () {
   "use strict";
 
   const STORAGE_KEY = "memo-app.memos.v1";
-  const SYNC_KEY = "memo-app.sync.v1";
-  const GIST_DESC = "メモ帳アプリの同期データ (memo-app)";
-  const GIST_FILE = "memos.json";
-  const API_BASE = "https://api.github.com";
-  const PUSH_DELAY = 2000;
-  const POLL_INTERVAL = 30000;
   const TOMBSTONE_TTL = 60 * 24 * 3600 * 1000; // 削除の記録を60日保持
+  const SDK = "https://www.gstatic.com/firebasejs/10.12.2";
 
   // --- State ---
   let memos = load();
@@ -16,12 +11,13 @@
   let searchQuery = "";
   let saveTimer = null;
 
-  let syncConfig = loadSyncConfig(); // { token, gistId } | null
-  let pushTimer = null;
-  let syncBusy = false;
-  let lastSyncAt = null;
-  let syncError = null;
-  let pollTimer = null;
+  // Firebase関連
+  let fb = null; // { fs, db, auth, signInWithPopup, GoogleAuthProvider, signOut }
+  let user = null;
+  let unsubscribe = null;
+  let remoteById = new Map(); // サーバ側の最新状態（差分アップロードの判定用）
+  let syncState = "off"; // off | nologin | live | error
+  let syncErrorMsg = null;
 
   // --- Elements ---
   const memoList = document.getElementById("memoList");
@@ -37,13 +33,16 @@
   const syncBtn = document.getElementById("syncBtn");
   const syncLabel = document.getElementById("syncLabel");
   const syncModal = document.getElementById("syncModal");
-  const tokenInput = document.getElementById("tokenInput");
+  const syncSetupView = document.getElementById("syncSetupView");
+  const syncLoginView = document.getElementById("syncLoginView");
+  const syncUserView = document.getElementById("syncUserView");
+  const userLabel = document.getElementById("userLabel");
+  const loginBtn = document.getElementById("loginBtn");
+  const logoutBtn = document.getElementById("logoutBtn");
   const syncModalStatus = document.getElementById("syncModalStatus");
-  const syncConnectBtn = document.getElementById("syncConnectBtn");
-  const syncDisconnectBtn = document.getElementById("syncDisconnectBtn");
   const syncCloseBtn = document.getElementById("syncCloseBtn");
 
-  // --- Persistence ---
+  // --- Persistence (ローカルキャッシュ) ---
   function load() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -61,25 +60,6 @@
       localStorage.setItem(STORAGE_KEY, JSON.stringify(memos));
     } catch (e) {
       console.error("メモの保存に失敗しました", e);
-    }
-  }
-
-  function loadSyncConfig() {
-    try {
-      const raw = localStorage.getItem(SYNC_KEY);
-      const cfg = raw ? JSON.parse(raw) : null;
-      return cfg && cfg.token ? cfg : null;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  function saveSyncConfig(cfg) {
-    syncConfig = cfg;
-    if (cfg) {
-      localStorage.setItem(SYNC_KEY, JSON.stringify(cfg));
-    } else {
-      localStorage.removeItem(SYNC_KEY);
     }
   }
 
@@ -246,22 +226,20 @@
   }
 
   function updateSyncLabel() {
-    if (!syncConfig) {
+    syncLabel.title = "";
+    if (syncState === "off") {
       syncLabel.textContent = "同期: 未設定";
       syncLabel.className = "sync-label";
-    } else if (syncError) {
+    } else if (syncState === "nologin") {
+      syncLabel.textContent = "未ログイン";
+      syncLabel.className = "sync-label";
+    } else if (syncState === "error") {
       syncLabel.textContent = "同期エラー";
       syncLabel.className = "sync-label sync-error";
-      syncLabel.title = syncError;
-    } else if (syncBusy) {
-      syncLabel.textContent = "同期中…";
-      syncLabel.className = "sync-label";
-    } else if (lastSyncAt) {
-      syncLabel.textContent = "同期済み " + formatDate(lastSyncAt);
-      syncLabel.className = "sync-label sync-ok";
+      syncLabel.title = syncErrorMsg || "";
     } else {
-      syncLabel.textContent = "同期: 待機中";
-      syncLabel.className = "sync-label";
+      syncLabel.textContent = "リアルタイム同期中";
+      syncLabel.className = "sync-label sync-ok";
     }
   }
 
@@ -282,7 +260,7 @@
     };
     memos.push(memo);
     save();
-    schedulePush();
+    pushMemo(memo);
     selectMemo(memo.id);
     titleInput.focus();
   }
@@ -306,7 +284,7 @@
       save();
       renderList();
       savedLabel.textContent = "保存しました";
-      schedulePush();
+      pushMemo(memo);
     }, 400);
   }
 
@@ -317,47 +295,15 @@
     if (!confirm(`「${name}」を削除しますか？`)) return;
     // 他端末にも削除が伝わるよう、消すのではなく削除済みの印を残す
     const idx = memos.findIndex((m) => m.id === selectedId);
-    memos[idx] = { id: memo.id, deleted: true, updatedAt: Date.now() };
+    const tombstone = { id: memo.id, deleted: true, updatedAt: Date.now() };
+    memos[idx] = tombstone;
     selectedId = null;
     save();
-    schedulePush();
+    pushMemo(tombstone);
     render();
   }
 
-  // --- Gist sync ---
-  async function api(method, path, body) {
-    const res = await fetch(API_BASE + path, {
-      method,
-      headers: {
-        Authorization: "token " + syncConfig.token,
-        Accept: "application/vnd.github+json",
-        ...(body ? { "Content-Type": "application/json" } : {}),
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    if (!res.ok) {
-      const msg = res.status === 401 ? "トークンが無効です" : `GitHub APIエラー (${res.status})`;
-      throw new Error(msg);
-    }
-    return res.json();
-  }
-
-  async function readRemote() {
-    const gist = await api("GET", "/gists/" + syncConfig.gistId);
-    const file = gist.files && gist.files[GIST_FILE];
-    if (!file) return [];
-    let content = file.content;
-    if (file.truncated) {
-      content = await (await fetch(file.raw_url)).text();
-    }
-    try {
-      const data = JSON.parse(content);
-      return Array.isArray(data) ? data : [];
-    } catch (e) {
-      return [];
-    }
-  }
-
+  // --- Firebase同期 ---
   function mergeMemos(a, b) {
     const byId = new Map();
     for (const m of [...a, ...b]) {
@@ -376,7 +322,40 @@
     return local.filter((m) => !(m.sample && m.updatedAt === m.createdAt));
   }
 
-  function adoptMerged(merged) {
+  function setSyncError(e) {
+    syncState = "error";
+    syncErrorMsg = (e && e.message) || String(e);
+    console.error("同期エラー", e);
+    updateSyncLabel();
+  }
+
+  function pushMemo(memo) {
+    if (!fb || !user) return;
+    const ref = fb.fs.doc(fb.db, "users", user.uid, "memos", memo.id);
+    fb.fs
+      .setDoc(ref, memo)
+      .then(() => {
+        remoteById.set(memo.id, memo);
+        if (syncState === "error") {
+          syncState = "live";
+          updateSyncLabel();
+        }
+      })
+      .catch(setSyncError);
+  }
+
+  // スナップショット（サーバの全メモ）を受け取り、ローカルとマージして双方向に反映
+  function applySnapshot(remote) {
+    remoteById = new Map(remote.map((m) => [m.id, m]));
+    const local = withoutUntouchedSamples(memos, remote);
+    const merged = mergeMemos(local, remote);
+
+    // ローカルの方が新しい/サーバに無いメモはアップロード
+    for (const m of merged) {
+      const r = remoteById.get(m.id);
+      if (!r || (m.updatedAt || 0) > (r.updatedAt || 0)) pushMemo(m);
+    }
+
     const changed = JSON.stringify(merged) !== JSON.stringify(memos);
     memos = merged;
     if (changed) {
@@ -385,81 +364,79 @@
     }
   }
 
-  async function doSync(alsoWrite) {
-    if (!syncConfig || syncBusy) return;
-    syncBusy = true;
-    syncError = null;
-    updateSyncLabel();
-    try {
-      const remote = await readRemote();
-      const merged = mergeMemos(withoutUntouchedSamples(memos, remote), remote);
-      if (alsoWrite || JSON.stringify(merged) !== JSON.stringify(remote)) {
-        await api("PATCH", "/gists/" + syncConfig.gistId, {
-          files: { [GIST_FILE]: { content: JSON.stringify(merged, null, 1) } },
-        });
-      }
-      adoptMerged(merged);
-      lastSyncAt = Date.now();
-    } catch (e) {
-      syncError = e.message || String(e);
-      console.error("同期に失敗しました", e);
-    } finally {
-      syncBusy = false;
-      updateSyncLabel();
-    }
-  }
-
-  function schedulePush() {
-    if (!syncConfig) return;
-    clearTimeout(pushTimer);
-    pushTimer = setTimeout(() => doSync(true), PUSH_DELAY);
-  }
-
-  function startPolling() {
-    clearInterval(pollTimer);
-    if (!syncConfig) return;
-    pollTimer = setInterval(() => doSync(false), POLL_INTERVAL);
-  }
-
-  async function connect(token) {
-    syncConfig = { token, gistId: null };
-    // 既存の同期用Gistを探し、なければ作成する
-    const gists = await api("GET", "/gists?per_page=100");
-    const found = gists.find(
-      (g) => g.description === GIST_DESC && g.files && g.files[GIST_FILE]
+  function startListening() {
+    stopListening();
+    const col = fb.fs.collection(fb.db, "users", user.uid, "memos");
+    unsubscribe = fb.fs.onSnapshot(
+      col,
+      (snap) => {
+        syncState = "live";
+        applySnapshot(snap.docs.map((d) => d.data()));
+        updateSyncLabel();
+      },
+      setSyncError
     );
-    let gistId;
-    if (found) {
-      gistId = found.id;
-    } else {
-      const created = await api("POST", "/gists", {
-        description: GIST_DESC,
-        public: false,
-        files: { [GIST_FILE]: { content: JSON.stringify(memos, null, 1) } },
-      });
-      gistId = created.id;
-    }
-    saveSyncConfig({ token, gistId });
-    await doSync(true);
-    startPolling();
   }
 
-  function disconnect() {
-    saveSyncConfig(null);
-    clearInterval(pollTimer);
-    clearTimeout(pushTimer);
-    lastSyncAt = null;
-    syncError = null;
-    updateSyncLabel();
+  function stopListening() {
+    if (unsubscribe) unsubscribe();
+    unsubscribe = null;
+    remoteById = new Map();
+  }
+
+  async function initFirebase() {
+    const cfg = window.FIREBASE_CONFIG;
+    if (!cfg) {
+      syncState = "off";
+      updateSyncLabel();
+      return;
+    }
+    try {
+      const [{ initializeApp }, authMod, fs] = await Promise.all([
+        import(`${SDK}/firebase-app.js`),
+        import(`${SDK}/firebase-auth.js`),
+        import(`${SDK}/firebase-firestore.js`),
+      ]);
+      const app = initializeApp(cfg);
+      fb = {
+        fs,
+        db: fs.getFirestore(app),
+        auth: authMod.getAuth(app),
+        signInWithPopup: authMod.signInWithPopup,
+        GoogleAuthProvider: authMod.GoogleAuthProvider,
+        signOut: authMod.signOut,
+      };
+      authMod.onAuthStateChanged(fb.auth, (u) => {
+        user = u;
+        if (u) {
+          startListening();
+        } else {
+          stopListening();
+          syncState = "nologin";
+        }
+        updateSyncLabel();
+        updateModalViews();
+      });
+      syncState = "nologin";
+      updateSyncLabel();
+    } catch (e) {
+      setSyncError(e);
+    }
   }
 
   // --- Sync modal ---
+  function updateModalViews() {
+    syncSetupView.hidden = !(syncState === "off");
+    syncLoginView.hidden = !(syncState !== "off" && !user);
+    syncUserView.hidden = !user;
+    if (user) {
+      userLabel.textContent = user.displayName || user.email || "ログイン中";
+    }
+  }
+
   function openModal() {
-    tokenInput.value = "";
-    tokenInput.placeholder = syncConfig ? "設定済み（変更する場合のみ入力）" : "ghp_...";
-    syncModalStatus.textContent = syncConfig
-      ? "同期は有効です。別の端末では同じトークンを貼るだけで繋がります。"
-      : "";
+    syncModalStatus.textContent = "";
+    updateModalViews();
     syncModal.hidden = false;
   }
 
@@ -467,24 +444,25 @@
     syncModal.hidden = true;
   }
 
-  async function onConnectClick() {
-    const token = tokenInput.value.trim() || (syncConfig && syncConfig.token);
-    if (!token) {
-      syncModalStatus.textContent = "トークンを入力してください。";
-      return;
-    }
-    syncConnectBtn.disabled = true;
-    syncModalStatus.textContent = "接続しています…";
+  async function onLoginClick() {
+    if (!fb) return;
+    syncModalStatus.textContent = "ログインしています…";
     try {
-      await connect(token);
-      syncModalStatus.textContent = "接続しました！このタブと他の端末で同期されます。";
-      updateSyncLabel();
+      await fb.signInWithPopup(fb.auth, new fb.GoogleAuthProvider());
+      syncModalStatus.textContent = "ログインしました。同期が有効です。";
     } catch (e) {
-      saveSyncConfig(null);
-      syncModalStatus.textContent = "接続に失敗しました: " + (e.message || e);
-    } finally {
-      syncConnectBtn.disabled = false;
+      syncModalStatus.textContent =
+        "ログインに失敗しました: " +
+        (e.code === "auth/popup-blocked"
+          ? "ポップアップがブロックされました。許可して再度お試しください。"
+          : e.message || e);
     }
+  }
+
+  async function onLogoutClick() {
+    if (!fb) return;
+    await fb.signOut(fb.auth);
+    syncModalStatus.textContent = "ログアウトしました（メモはこの端末に残ります）。";
   }
 
   // --- Events ---
@@ -499,11 +477,8 @@
 
   syncBtn.addEventListener("click", openModal);
   syncCloseBtn.addEventListener("click", closeModal);
-  syncConnectBtn.addEventListener("click", onConnectClick);
-  syncDisconnectBtn.addEventListener("click", () => {
-    disconnect();
-    syncModalStatus.textContent = "同期を解除しました（メモはこの端末に残ります）。";
-  });
+  loginBtn.addEventListener("click", onLoginClick);
+  logoutBtn.addEventListener("click", onLogoutClick);
   syncModal.addEventListener("click", (e) => {
     if (e.target === syncModal) closeModal();
   });
@@ -516,15 +491,7 @@
     }
   });
 
-  // 画面に戻ってきた時に最新を取得
-  document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) doSync(false);
-  });
-
   // --- Init ---
   render();
-  if (syncConfig) {
-    doSync(false);
-    startPolling();
-  }
+  initFirebase();
 })();
