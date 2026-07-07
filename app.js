@@ -564,6 +564,10 @@
       syncLabel.textContent = "リアルタイム同期中";
       syncLabel.className = "sync-label sync-ok";
     }
+    // ⚙ボタンの色も同期状態に合わせる（同期中=緑、エラー=赤）
+    syncBtn.className =
+      "icon-btn" +
+      (syncState === "live" ? " sync-ok" : syncState === "error" ? " sync-error" : "");
   }
 
   function render() {

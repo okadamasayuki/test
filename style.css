@@ -79,6 +79,15 @@ body {
   cursor: pointer;
   transition: background 0.15s;
 }
+.icon-btn.sync-ok {
+  color: #34a853;
+  border-color: #34a853;
+}
+.icon-btn.sync-error {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
 .icon-btn.select-toggle {
   width: auto;
   padding: 0 10px;
