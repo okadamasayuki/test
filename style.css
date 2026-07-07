@@ -16,6 +16,11 @@
   padding: 0;
 }
 
+/* display:flex などが hidden 属性を上書きしないようにする */
+[hidden] {
+  display: none !important;
+}
+
 html, body {
   height: 100%;
 }
