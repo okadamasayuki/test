@@ -54,6 +54,7 @@
   const userLabel = document.getElementById("userLabel");
   const loginBtn = document.getElementById("loginBtn");
   const logoutBtn = document.getElementById("logoutBtn");
+  const seedBtn = document.getElementById("seedBtn");
   const emailInput = document.getElementById("emailInput");
   const passwordInput = document.getElementById("passwordInput");
   const signupBtn = document.getElementById("signupBtn");
@@ -978,6 +979,59 @@
     }
   }
 
+  // --- サンプルデータの投入 ---
+  const SAMPLE_FILES = [
+    ["samples/photo-whiteboard.jpg", "写真_ホワイトボード板書.jpg", "image/jpeg"],
+    ["samples/photo-office.jpg", "写真_オフィス風景.jpg", "image/jpeg"],
+    ["samples/photo-product-mock.jpg", "写真_製品モックアップ.jpg", "image/jpeg"],
+    ["samples/photo-team-lunch.jpg", "写真_チームランチ.jpg", "image/jpeg"],
+    ["samples/photo-logo-draft.jpg", "写真_ロゴ案スケッチ.jpg", "image/jpeg"],
+    ["samples/doc-mitsumori.pdf", "見積書_A社.pdf", "application/pdf"],
+    ["samples/doc-seikyusho.pdf", "請求書_2026年6月.pdf", "application/pdf"],
+    ["samples/doc-kaigi-shiryo.pdf", "会議資料_新機能レビュー.pdf", "application/pdf"],
+    ["samples/doc-ryohi.pdf", "出張旅費精算書.pdf", "application/pdf"],
+    ["samples/doc-catalog.pdf", "製品カタログ2026.pdf", "application/pdf"],
+    ["samples/word-gijiroku.docx", "議事録_週次定例.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+    ["samples/word-teiansho.docx", "提案書_業務改善ドラフト.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+    ["samples/word-houkoku.docx", "業務報告書_2026年6月.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+    ["samples/word-tejunsho.docx", "手順書_リリース作業.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+    ["samples/word-keiyaku.docx", "契約書テンプレート.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+  ];
+
+  async function seedSampleData() {
+    if (!fb || !user) return;
+    seedBtn.disabled = true;
+    try {
+      // メモ: 同じタイトルがまだ無いものだけ追加する
+      const titles = new Set(visibleMemos().map((m) => m.title));
+      const newMemos = sampleMemos().filter((m) => !titles.has(m.title));
+      for (const m of newMemos) {
+        delete m.sample; // 投入したメモは通常メモ扱い（同期の重複排除対象にしない）
+        memos.push(m);
+        pushMemo(m);
+      }
+      if (newMemos.length) {
+        save();
+        render();
+      }
+      syncModalStatus.textContent = `メモを${newMemos.length}件追加しました。サンプルファイルを準備中…`;
+
+      const files = [];
+      for (const [path, name, type] of SAMPLE_FILES) {
+        const res = await fetch(path);
+        if (!res.ok) throw new Error(`${path} の取得に失敗 (${res.status})`);
+        files.push(new File([await res.blob()], name, { type }));
+      }
+      closeModal();
+      switchTab("files");
+      await uploadFiles(files);
+    } catch (e) {
+      syncModalStatus.textContent = "サンプルデータの投入に失敗しました: " + (e.message || e);
+    } finally {
+      seedBtn.disabled = false;
+    }
+  }
+
   async function onLogoutClick() {
     if (!fb) return;
     await fb.signOut(fb.auth);
@@ -1019,6 +1073,7 @@
   emailLoginBtn.addEventListener("click", onEmailLoginClick);
   resetLink.addEventListener("click", onResetClick);
   logoutBtn.addEventListener("click", onLogoutClick);
+  seedBtn.addEventListener("click", seedSampleData);
   syncModal.addEventListener("click", (e) => {
     if (e.target === syncModal) closeModal();
   });

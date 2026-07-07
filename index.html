@@ -83,9 +83,12 @@
       <div id="syncUserView" hidden>
         <p class="modal-desc">
           <strong id="userLabel"></strong> としてログイン中。リアルタイム同期が有効です。<br>
-          他の端末でも同じGoogleアカウントでログインすると繋がります。
+          他の端末でも同じアカウントでログインすると繋がります。
         </p>
-        <button id="logoutBtn" class="modal-btn">ログアウト</button>
+        <div class="auth-btns">
+          <button id="seedBtn" class="modal-btn">サンプルデータを投入</button>
+          <button id="logoutBtn" class="modal-btn">ログアウト</button>
+        </div>
       </div>
       <p id="syncModalStatus" class="modal-status"></p>
       <div class="modal-actions">
