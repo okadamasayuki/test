@@ -1141,10 +1141,17 @@
         save();
         render();
       }
+      // ファイルも同名のものが既にあれば追加しない
+      const existingNames = new Set(filesMeta.map((f) => f.name));
+      const toUpload = SAMPLE_FILES.filter(([, name]) => !existingNames.has(name));
+      if (!toUpload.length) {
+        syncModalStatus.textContent = `メモを${newMemos.length}件追加しました。サンプルファイルは投入済みです。`;
+        return;
+      }
       syncModalStatus.textContent = `メモを${newMemos.length}件追加しました。サンプルファイルを準備中…`;
 
       const files = [];
-      for (const [path, name, type] of SAMPLE_FILES) {
+      for (const [path, name, type] of toUpload) {
         const res = await fetch(path);
         if (!res.ok) throw new Error(`${path} の取得に失敗 (${res.status})`);
         files.push(new File([await res.blob()], name, { type }));
