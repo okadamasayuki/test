@@ -35,6 +35,8 @@ body {
 .app {
   display: flex;
   height: 100vh;
+  /* iOS Safariでツールバー分はみ出さないよう、動的ビューポート高さを使う */
+  height: 100dvh;
 }
 
 /* --- Sidebar --- */
@@ -436,6 +438,7 @@ body {
   outline: none;
   resize: none;
   flex: 1;
+  min-height: 0; /* 長文でもフッター(削除ボタン)を押し出さない */
   font-size: 15px;
   line-height: 1.7;
   background: transparent;
