@@ -758,14 +758,38 @@
   }
 
   // --- プレビュー ---
+  function isDocx(meta) {
+    return (
+      meta.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      (meta.name || "").toLowerCase().endsWith(".docx")
+    );
+  }
+
   function previewable(meta) {
     const t = meta.type || "";
     return (
       t.startsWith("image/") ||
       t === "application/pdf" ||
       t.startsWith("text/") ||
-      t === "application/json"
+      t === "application/json" ||
+      isDocx(meta)
     );
+  }
+
+  // mammoth.js（docx→HTML変換）は必要になった時に一度だけ読み込む
+  let mammothLoading = null;
+  function loadMammoth() {
+    if (window.mammoth) return Promise.resolve(window.mammoth);
+    if (!mammothLoading) {
+      mammothLoading = new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = "vendor/mammoth.browser.min.js";
+        s.onload = () => resolve(window.mammoth);
+        s.onerror = () => reject(new Error("プレビュー用ライブラリの読み込みに失敗しました"));
+        document.head.appendChild(s);
+      });
+    }
+    return mammothLoading;
   }
 
   let previewCurrent = null; // { meta, blob, url }
@@ -780,6 +804,8 @@
       previewCurrent = { meta, blob, url };
       previewTitle.textContent = meta.name;
       previewBody.innerHTML = "";
+      // docxはブラウザが直接開けないので「新しいタブで開く」を出さない
+      previewTabBtn.hidden = isDocx(meta);
       const t = meta.type || "";
       if (t.startsWith("image/")) {
         const img = document.createElement("img");
@@ -791,6 +817,13 @@
         frame.src = url;
         frame.title = meta.name;
         previewBody.appendChild(frame);
+      } else if (isDocx(meta)) {
+        const mammoth = await loadMammoth();
+        const result = await mammoth.convertToHtml({ arrayBuffer: await blob.arrayBuffer() });
+        const div = document.createElement("div");
+        div.className = "docx-content";
+        div.innerHTML = result.value;
+        previewBody.appendChild(div);
       } else {
         const pre = document.createElement("pre");
         pre.textContent = await blob.text();
