@@ -35,6 +35,7 @@
   // --- Elements ---
   const memoList = document.getElementById("memoList");
   const searchInput = document.getElementById("searchInput");
+  const sortDueBtn = document.getElementById("sortDueBtn");
   const newBtn = document.getElementById("newBtn");
   const selectBtn = document.getElementById("selectBtn");
   const selectBar = document.getElementById("selectBar");
@@ -248,12 +249,22 @@
   function setDue(ts) {
     const memo = getMemo(selectedId);
     if (!memo) return;
+    // 並び順が未確定(order無し)のメモはupdatedAt更新で先頭に跳ねてしまうため、
+    // 先に現在の表示順を全メモに確定させて位置を動かさない
+    if (typeof memo.order !== "number") {
+      sortedMemos().forEach((m, i) => {
+        if (m.order !== i) {
+          m.order = i;
+          m.updatedAt = Date.now();
+          pushMemo(m);
+        }
+      });
+    }
     if (ts === null) delete memo.due;
     else memo.due = ts;
     memo.updatedAt = Date.now();
     delete memo.sample;
     pushMemo(memo);
-    if (ts !== null) resortByDue(); // 期日登録時は期日順に整列し直す
     save();
     render();
   }
@@ -272,7 +283,7 @@
     return visibleMemos().sort((a, b) => sortKey(a) - sortKey(b));
   }
 
-  // 期日を登録したタイミングで、期日ありを期日が近い順に先頭へ並べ直す
+  // 「期日順」ボタン: 期日ありを期日が近い順に先頭へ並べ直す
   // （その後のドラッグでの手動並び替えは自由にできる）
   function resortByDue() {
     const list = visibleMemos();
@@ -818,6 +829,7 @@
     tabFiles.classList.toggle("active", tab === "files");
     newBtn.hidden = tab !== "memos";
     uploadBtn.hidden = tab !== "files";
+    sortDueBtn.hidden = tab !== "memos";
     render();
   }
 
@@ -1456,6 +1468,12 @@
   searchInput.addEventListener("input", (e) => {
     searchQuery = e.target.value;
     renderList();
+  });
+
+  sortDueBtn.addEventListener("click", () => {
+    resortByDue();
+    save();
+    render();
   });
 
   tabMemos.addEventListener("click", () => switchTab("memos"));
