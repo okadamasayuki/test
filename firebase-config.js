@@ -1,14 +1,11 @@
-// Firebaseプロジェクトの設定（READMEの手順で取得した値に置き換える）
-// 未設定(null)の間、アプリはこの端末内のみで動作します。
+// Firebaseプロジェクトの設定
 // このapiKeyはサーバー秘密鍵ではなくプロジェクト識別子であり、公開しても
 // 問題ありません（アクセス制御はFirestoreのセキュリティルールで行います）。
-window.FIREBASE_CONFIG = null;
-// 例:
-// window.FIREBASE_CONFIG = {
-//   apiKey: "AIza....",
-//   authDomain: "your-project.firebaseapp.com",
-//   projectId: "your-project",
-//   storageBucket: "your-project.firebasestorage.app",
-//   messagingSenderId: "123456789",
-//   appId: "1:123456789:web:abcdef",
-// };
+window.FIREBASE_CONFIG = {
+  apiKey: "AIzaSyAuZEN_0GgN3JrVDE7aOSqRsAI2bkLYOsk",
+  authDomain: "test-memo-c740a.firebaseapp.com",
+  projectId: "test-memo-c740a",
+  storageBucket: "test-memo-c740a.firebasestorage.app",
+  messagingSenderId: "93414793974",
+  appId: "1:93414793974:web:cb2cc17a732f2a1ba702d7",
+};
