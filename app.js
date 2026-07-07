@@ -12,7 +12,9 @@
   let selectedId = null;
   let searchQuery = "";
   let saveTimer = null;
-  let currentTab = "memos"; // "memos" | "files"
+  const TAB_KEY = "memo-app.tab.v1";
+  // リロードしても選択中のタブを維持する
+  let currentTab = localStorage.getItem(TAB_KEY) === "files" ? "files" : "memos";
   let selectMode = false; // 一括削除の選択モード
   const checkedIds = new Set();
 
@@ -575,6 +577,9 @@
       checkedIds.clear();
     }
     currentTab = tab;
+    try {
+      localStorage.setItem(TAB_KEY, tab);
+    } catch (e) {}
     tabMemos.classList.toggle("active", tab === "memos");
     tabFiles.classList.toggle("active", tab === "files");
     newBtn.hidden = tab !== "memos";
@@ -1275,6 +1280,6 @@
   })();
 
   // --- Init ---
-  render();
+  switchTab(currentTab); // タブのボタン表示を含めて初期化（内部でrenderされる）
   initFirebase();
 })();
