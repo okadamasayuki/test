@@ -355,6 +355,46 @@ body {
   cursor: default;
 }
 
+/* --- File preview --- */
+.preview-modal {
+  max-width: 760px;
+}
+
+.preview-modal h2 {
+  word-break: break-all;
+}
+
+.preview-body {
+  max-height: 65vh;
+  overflow: auto;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.preview-body img {
+  display: block;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.preview-body iframe {
+  display: block;
+  width: 100%;
+  height: 60vh;
+  border: none;
+}
+
+.preview-body pre {
+  padding: 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
 /* --- Editor --- */
 .editor {
   flex: 1;

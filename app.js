@@ -60,6 +60,12 @@
   const resetLink = document.getElementById("resetLink");
   const syncModalStatus = document.getElementById("syncModalStatus");
   const syncCloseBtn = document.getElementById("syncCloseBtn");
+  const previewModal = document.getElementById("previewModal");
+  const previewTitle = document.getElementById("previewTitle");
+  const previewBody = document.getElementById("previewBody");
+  const previewDownloadBtn = document.getElementById("previewDownloadBtn");
+  const previewTabBtn = document.getElementById("previewTabBtn");
+  const previewCloseBtn = document.getElementById("previewCloseBtn");
 
   // --- Persistence (ローカルキャッシュ) ---
   function load() {
@@ -411,15 +417,16 @@
 
     const list = filteredFiles();
     list.forEach((f) => {
+      const canPreview = previewable(f);
       memoList.appendChild(
         buildRow({
           titleText: f.name,
           previewText: downloadingIds.has(f.id)
-            ? "ダウンロード中…"
-            : `${formatSize(f.size)}・タップでダウンロード`,
+            ? "読み込み中…"
+            : `${formatSize(f.size)}・タップで${canPreview ? "プレビュー" : "ダウンロード"}`,
           dateText: formatDate(f.createdAt),
           selected: false,
-          onTap: () => downloadFile(f),
+          onTap: () => (canPreview ? previewFile(f) : downloadFile(f)),
           onDelete: () => deleteFile(f),
         })
       );
@@ -602,32 +609,96 @@
     }
   }
 
+  async function fetchFileBlob(meta) {
+    const parts = [];
+    for (let i = 0; i < meta.chunkCount; i++) {
+      const ref = fb.fs.doc(fb.db, "users", user.uid, "chunks", `${meta.id}_${i}`);
+      const snap = await fb.fs.getDoc(ref);
+      if (!snap.exists()) throw new Error("ファイルの一部が見つかりません");
+      parts.push(snap.data().data);
+    }
+    return new Blob([b64ToBytes(parts.join(""))], { type: meta.type });
+  }
+
+  function triggerDownload(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  }
+
   async function downloadFile(meta) {
     if (!fb || !user || downloadingIds.has(meta.id)) return;
     downloadingIds.add(meta.id);
     renderList();
     try {
-      const parts = [];
-      for (let i = 0; i < meta.chunkCount; i++) {
-        const ref = fb.fs.doc(fb.db, "users", user.uid, "chunks", `${meta.id}_${i}`);
-        const snap = await fb.fs.getDoc(ref);
-        if (!snap.exists()) throw new Error("ファイルの一部が見つかりません");
-        parts.push(snap.data().data);
-      }
-      const blob = new Blob([b64ToBytes(parts.join(""))], { type: meta.type });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = meta.name;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      triggerDownload(await fetchFileBlob(meta), meta.name);
     } catch (e) {
       alert(`「${meta.name}」のダウンロードに失敗しました: ` + (e.message || e));
     } finally {
       downloadingIds.delete(meta.id);
       renderList();
+    }
+  }
+
+  // --- プレビュー ---
+  function previewable(meta) {
+    const t = meta.type || "";
+    return (
+      t.startsWith("image/") ||
+      t === "application/pdf" ||
+      t.startsWith("text/") ||
+      t === "application/json"
+    );
+  }
+
+  let previewCurrent = null; // { meta, blob, url }
+
+  async function previewFile(meta) {
+    if (!fb || !user || downloadingIds.has(meta.id)) return;
+    downloadingIds.add(meta.id);
+    renderList();
+    try {
+      const blob = await fetchFileBlob(meta);
+      const url = URL.createObjectURL(blob);
+      previewCurrent = { meta, blob, url };
+      previewTitle.textContent = meta.name;
+      previewBody.innerHTML = "";
+      const t = meta.type || "";
+      if (t.startsWith("image/")) {
+        const img = document.createElement("img");
+        img.src = url;
+        img.alt = meta.name;
+        previewBody.appendChild(img);
+      } else if (t === "application/pdf") {
+        const frame = document.createElement("iframe");
+        frame.src = url;
+        frame.title = meta.name;
+        previewBody.appendChild(frame);
+      } else {
+        const pre = document.createElement("pre");
+        pre.textContent = await blob.text();
+        previewBody.appendChild(pre);
+      }
+      previewModal.hidden = false;
+    } catch (e) {
+      alert(`「${meta.name}」のプレビューに失敗しました: ` + (e.message || e));
+    } finally {
+      downloadingIds.delete(meta.id);
+      renderList();
+    }
+  }
+
+  function closePreview() {
+    previewModal.hidden = true;
+    previewBody.innerHTML = "";
+    if (previewCurrent) {
+      URL.revokeObjectURL(previewCurrent.url);
+      previewCurrent = null;
     }
   }
 
@@ -912,6 +983,16 @@
 
   syncBtn.addEventListener("click", openModal);
   syncCloseBtn.addEventListener("click", closeModal);
+  previewCloseBtn.addEventListener("click", closePreview);
+  previewModal.addEventListener("click", (e) => {
+    if (e.target === previewModal) closePreview();
+  });
+  previewDownloadBtn.addEventListener("click", () => {
+    if (previewCurrent) triggerDownload(previewCurrent.blob, previewCurrent.meta.name);
+  });
+  previewTabBtn.addEventListener("click", () => {
+    if (previewCurrent) window.open(previewCurrent.url, "_blank");
+  });
   loginBtn.addEventListener("click", onLoginClick);
   signupBtn.addEventListener("click", onSignupClick);
   emailLoginBtn.addEventListener("click", onEmailLoginClick);
