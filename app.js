@@ -818,6 +818,7 @@
 
   function switchTab(tab) {
     if (currentTab !== tab) {
+      discardFreshIfEmpty(null);
       selectMode = false;
       checkedIds.clear();
     }
@@ -834,7 +835,25 @@
   }
 
   // --- Actions (メモ) ---
+  // 作成したまま何も入力されなかった新規メモは、離れた時に自動で消す
+  let freshMemoId = null;
+
+  function discardFreshIfEmpty(exceptId) {
+    if (!freshMemoId || freshMemoId === exceptId) {
+      if (freshMemoId === exceptId) return;
+      freshMemoId = null;
+      return;
+    }
+    const m = getMemo(freshMemoId);
+    if (m && !m.title.trim() && !m.body.trim()) {
+      deleteMemoNow(freshMemoId);
+      save();
+    }
+    freshMemoId = null;
+  }
+
   function createMemo() {
+    discardFreshIfEmpty(null);
     const memo = {
       id: uid(),
       title: "",
@@ -843,6 +862,7 @@
       updatedAt: Date.now(),
     };
     memos.push(memo);
+    freshMemoId = memo.id;
     save();
     pushMemo(memo);
     selectMemo(memo.id);
@@ -854,6 +874,7 @@
   }
 
   function selectMemo(id) {
+    discardFreshIfEmpty(id);
     // スマホではエディタが全画面になるため、ブラウザの「戻る」で一覧に
     // 戻れるよう履歴を1つ積む（iOSの端からの戻るスワイプにも対応）
     if (isMobile() && !(history.state && history.state.memoOpen)) {
@@ -866,6 +887,7 @@
   // アプリ内の「戻る」では履歴操作をしない（history.back()の非同期性と
   // 競合して二重に戻る事故を防ぐ）。積んだ履歴はpopstate側で無害に消費される。
   function backToList() {
+    discardFreshIfEmpty(null);
     selectedId = null;
     render();
   }
@@ -1531,6 +1553,7 @@
   // ブラウザの「戻る」(iOSの端からのスワイプ含む)で一覧へ
   window.addEventListener("popstate", () => {
     if (selectedId) {
+      discardFreshIfEmpty(null);
       selectedId = null;
       render();
     }
