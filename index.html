@@ -13,6 +13,7 @@
       <div class="sidebar-header">
         <h1>メモ帳</h1>
         <div class="header-btns">
+          <button id="selectBtn" class="icon-btn select-toggle" title="選択して一括削除">選択</button>
           <button id="syncBtn" class="icon-btn" title="同期設定">⚙</button>
           <button id="newBtn" class="new-btn" title="新しいメモ">+ 新規</button>
           <button id="uploadBtn" class="new-btn" title="ファイルをアップロード" hidden>⬆ アップロード</button>
@@ -23,6 +24,11 @@
         <button id="tabFiles" class="tab">ファイル</button>
       </div>
       <input type="file" id="fileInput" hidden multiple>
+      <div id="selectBar" class="select-bar" hidden>
+        <button id="selectAllBtn" class="select-bar-btn">すべて選択</button>
+        <span id="selectCount" class="select-count"></span>
+        <button id="bulkDeleteBtn" class="select-bar-btn danger" disabled>削除</button>
+      </div>
       <div class="search-box">
         <input type="search" id="searchInput" placeholder="メモを検索…" autocomplete="off">
       </div>

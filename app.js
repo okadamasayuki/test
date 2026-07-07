@@ -13,6 +13,8 @@
   let searchQuery = "";
   let saveTimer = null;
   let currentTab = "memos"; // "memos" | "files"
+  let selectMode = false; // 一括削除の選択モード
+  const checkedIds = new Set();
 
   // Firebase関連
   let fb = null; // { fs, db, auth, signInWithPopup, GoogleAuthProvider, signOut }
@@ -32,6 +34,11 @@
   const memoList = document.getElementById("memoList");
   const searchInput = document.getElementById("searchInput");
   const newBtn = document.getElementById("newBtn");
+  const selectBtn = document.getElementById("selectBtn");
+  const selectBar = document.getElementById("selectBar");
+  const selectAllBtn = document.getElementById("selectAllBtn");
+  const selectCount = document.getElementById("selectCount");
+  const bulkDeleteBtn = document.getElementById("bulkDeleteBtn");
   const uploadBtn = document.getElementById("uploadBtn");
   const fileInput = document.getElementById("fileInput");
   const tabMemos = document.getElementById("tabMemos");
@@ -340,9 +347,12 @@
   }
 
   // --- Rendering ---
-  function buildRow({ titleText, previewText, dateText, selected, onTap, onDelete }) {
+  function buildRow({ id, titleText, previewText, dateText, selected, onTap, onDelete }) {
     const li = document.createElement("li");
-    li.className = "memo-item" + (selected ? " selected" : "");
+    li.className =
+      "memo-item" +
+      (selected ? " selected" : "") +
+      (selectMode && checkedIds.has(id) ? " checked" : "");
 
     const title = document.createElement("div");
     title.className = "memo-title";
@@ -356,9 +366,12 @@
     date.className = "memo-date";
     date.textContent = dateText;
 
+    const check = document.createElement("span");
+    check.className = "check-circle";
+
     const content = document.createElement("div");
     content.className = "memo-swipe-content";
-    content.append(title, preview, date);
+    content.append(check, title, preview, date);
 
     const del = document.createElement("button");
     del.className = "memo-delete-btn";
@@ -369,8 +382,72 @@
     });
 
     li.append(del, content);
-    attachSwipe(content, onTap);
+    attachSwipe(content, () => {
+      if (selectMode) {
+        if (checkedIds.has(id)) checkedIds.delete(id);
+        else checkedIds.add(id);
+        renderList();
+      } else {
+        onTap();
+      }
+    });
     return li;
+  }
+
+  // --- 選択モード（一括削除） ---
+  function currentListIds() {
+    return (currentTab === "memos" ? filteredMemos() : filteredFiles()).map((x) => x.id);
+  }
+
+  function updateSelectBar() {
+    selectBar.hidden = !selectMode;
+    selectBtn.textContent = selectMode ? "キャンセル" : "選択";
+    selectBtn.classList.toggle("active", selectMode);
+    memoList.classList.toggle("select-mode", selectMode);
+    if (!selectMode) return;
+    const n = checkedIds.size;
+    selectCount.textContent = n ? `${n}件選択中` : "タップして選択";
+    bulkDeleteBtn.textContent = n ? `削除 (${n})` : "削除";
+    bulkDeleteBtn.disabled = n === 0;
+    const ids = currentListIds();
+    selectAllBtn.textContent =
+      ids.length && ids.every((id) => checkedIds.has(id)) ? "選択解除" : "すべて選択";
+  }
+
+  function toggleSelectMode() {
+    selectMode = !selectMode;
+    checkedIds.clear();
+    renderList();
+  }
+
+  function toggleSelectAll() {
+    const ids = currentListIds();
+    if (ids.length && ids.every((id) => checkedIds.has(id))) {
+      checkedIds.clear();
+    } else {
+      ids.forEach((id) => checkedIds.add(id));
+    }
+    renderList();
+  }
+
+  async function bulkDelete() {
+    const n = checkedIds.size;
+    if (!n) return;
+    const kind = currentTab === "memos" ? "メモ" : "ファイル";
+    if (!confirm(`選択した${kind}${n}件を削除しますか？`)) return;
+    bulkDeleteBtn.disabled = true;
+    if (currentTab === "memos") {
+      for (const id of checkedIds) deleteMemoNow(id);
+      save();
+    } else {
+      for (const id of checkedIds) {
+        const meta = filesMeta.find((f) => f.id === id);
+        if (meta) await deleteFileNow(meta).catch(() => {});
+      }
+    }
+    selectMode = false;
+    checkedIds.clear();
+    render();
   }
 
   function renderList() {
@@ -382,6 +459,7 @@
       list.forEach((m) => {
         memoList.appendChild(
           buildRow({
+            id: m.id,
             titleText: m.title.trim() || "無題のメモ",
             previewText: m.body.trim().split("\n")[0] || "本文なし",
             dateText: formatDate(m.updatedAt),
@@ -395,6 +473,7 @@
       countLabel.textContent = searchQuery.trim() && total > 0
         ? `${list.length} / ${total} 件`
         : `${total} 件のメモ`;
+      updateSelectBar();
       return;
     }
 
@@ -422,6 +501,7 @@
       const canPreview = previewable(f);
       memoList.appendChild(
         buildRow({
+          id: f.id,
           titleText: f.name,
           previewText: downloadingIds.has(f.id)
             ? "読み込み中…"
@@ -434,6 +514,7 @@
       );
     });
     countLabel.textContent = `${filesMeta.length} 件のファイル`;
+    updateSelectBar();
   }
 
   function renderEditor() {
@@ -489,6 +570,10 @@
   }
 
   function switchTab(tab) {
+    if (currentTab !== tab) {
+      selectMode = false;
+      checkedIds.clear();
+    }
     currentTab = tab;
     tabMemos.classList.toggle("active", tab === "memos");
     tabFiles.classList.toggle("active", tab === "files");
@@ -552,18 +637,23 @@
     }, 400);
   }
 
+  // 他端末にも削除が伝わるよう、消すのではなく削除済みの印を残す
+  function deleteMemoNow(id) {
+    const idx = memos.findIndex((m) => m.id === id && !m.deleted);
+    if (idx < 0) return;
+    const tombstone = { id, deleted: true, updatedAt: Date.now() };
+    memos[idx] = tombstone;
+    if (selectedId === id) selectedId = null;
+    pushMemo(tombstone);
+  }
+
   function deleteMemoById(id) {
     const memo = getMemo(id);
     if (!memo) return;
     const name = memo.title.trim() || "このメモ";
     if (!confirm(`「${name}」を削除しますか？`)) return;
-    // 他端末にも削除が伝わるよう、消すのではなく削除済みの印を残す
-    const idx = memos.findIndex((m) => m.id === id);
-    const tombstone = { id: memo.id, deleted: true, updatedAt: Date.now() };
-    memos[idx] = tombstone;
-    if (selectedId === id) selectedId = null;
+    deleteMemoNow(id);
     save();
-    pushMemo(tombstone);
     render();
   }
 
@@ -724,16 +814,20 @@
     }
   }
 
+  async function deleteFileNow(meta) {
+    await fb.fs.deleteDoc(fb.fs.doc(fb.db, "users", user.uid, "files", meta.id));
+    for (let i = 0; i < meta.chunkCount; i++) {
+      fb.fs
+        .deleteDoc(fb.fs.doc(fb.db, "users", user.uid, "chunks", `${meta.id}_${i}`))
+        .catch(() => {});
+    }
+  }
+
   async function deleteFile(meta) {
     if (!fb || !user) return;
     if (!confirm(`「${meta.name}」を削除しますか？`)) return;
     try {
-      await fb.fs.deleteDoc(fb.fs.doc(fb.db, "users", user.uid, "files", meta.id));
-      for (let i = 0; i < meta.chunkCount; i++) {
-        fb.fs
-          .deleteDoc(fb.fs.doc(fb.db, "users", user.uid, "chunks", `${meta.id}_${i}`))
-          .catch(() => {});
-      }
+      await deleteFileNow(meta);
     } catch (e) {
       alert("削除に失敗しました: " + (e.message || e));
     }
@@ -1050,6 +1144,9 @@
 
   tabMemos.addEventListener("click", () => switchTab("memos"));
   tabFiles.addEventListener("click", () => switchTab("files"));
+  selectBtn.addEventListener("click", toggleSelectMode);
+  selectAllBtn.addEventListener("click", toggleSelectAll);
+  bulkDeleteBtn.addEventListener("click", bulkDelete);
   uploadBtn.addEventListener("click", () => fileInput.click());
   fileInput.addEventListener("change", () => {
     if (fileInput.files.length) uploadFiles([...fileInput.files]);
