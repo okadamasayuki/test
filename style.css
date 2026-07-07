@@ -170,6 +170,34 @@ body {
   box-sizing: border-box;
 }
 
+.memo-swipe-content.has-handle {
+  padding-right: 44px;
+}
+
+.drag-handle {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 10px 8px;
+  color: var(--text-muted);
+  font-size: 15px;
+  cursor: grab;
+  touch-action: none; /* ハンドル上ではスクロールさせずドラッグを拾う */
+  user-select: none;
+  -webkit-user-select: none;
+}
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+.memo-item.dragging {
+  opacity: 0.75;
+}
+.memo-item.dragging .memo-swipe-content {
+  background: var(--selected);
+}
+
 .memo-list.select-mode .memo-swipe-content {
   padding-left: 48px;
 }

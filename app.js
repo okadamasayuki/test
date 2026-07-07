@@ -199,8 +199,14 @@
     return memos.filter((m) => !m.deleted);
   }
 
+  // 並び順: 手動で並び替えたメモはorder昇順、未設定のもの(新規など)は
+  // 更新が新しい順に先頭へ来る
+  function sortKey(m) {
+    return typeof m.order === "number" ? m.order : -m.updatedAt;
+  }
+
   function sortedMemos() {
-    return visibleMemos().sort((a, b) => b.updatedAt - a.updatedAt);
+    return visibleMemos().sort((a, b) => sortKey(a) - sortKey(b));
   }
 
   function filteredMemos() {
@@ -349,9 +355,74 @@
     });
   }
 
+  // --- ドラッグ＆ドロップで並び替え ---
+  let draggingRow = false;
+
+  function commitOrder() {
+    const ids = [...memoList.querySelectorAll(".memo-item")].map((li) => li.dataset.id);
+    let changed = false;
+    ids.forEach((id, i) => {
+      const m = getMemo(id);
+      if (m && m.order !== i) {
+        m.order = i;
+        m.updatedAt = Date.now(); // 他端末へ並び順の変更を伝えるため
+        pushMemo(m);
+        changed = true;
+      }
+    });
+    if (changed) save();
+    renderList();
+  }
+
+  function attachDragHandle(handle, li) {
+    handle.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      draggingRow = true;
+      li.classList.add("dragging");
+
+      // 行のDOM移動でポインター捕捉が途切れることがあるため、
+      // move/upはwindow側で受ける
+      const move = (ev) => {
+        const y = ev.clientY;
+        const others = [...memoList.children].filter(
+          (el) => el !== li && el.classList.contains("memo-item")
+        );
+        let after = null;
+        for (const s of others) {
+          const r = s.getBoundingClientRect();
+          if (y < r.top + r.height / 2) {
+            after = s;
+            break;
+          }
+        }
+        if (after) {
+          if (after.previousElementSibling !== li) memoList.insertBefore(li, after);
+        } else if (memoList.lastElementChild !== li) {
+          memoList.appendChild(li);
+        }
+      };
+      const up = () => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        window.removeEventListener("pointercancel", up);
+        li.classList.remove("dragging");
+        draggingRow = false;
+        commitOrder();
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+      window.addEventListener("pointercancel", up);
+    });
+    // ハンドル上でのタッチスクロール・スワイプは無効化(touch-action:noneと併用)
+    handle.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
+    handle.addEventListener("click", (e) => e.stopPropagation());
+  }
+
   // --- Rendering ---
-  function buildRow({ id, titleText, previewText, dateText, selected, onTap, onDelete }) {
+  function buildRow({ id, titleText, previewText, dateText, selected, draggable, onTap, onDelete }) {
     const li = document.createElement("li");
+    li.dataset.id = id;
     li.className =
       "memo-item" +
       (selected ? " selected" : "") +
@@ -373,8 +444,17 @@
     check.className = "check-circle";
 
     const content = document.createElement("div");
-    content.className = "memo-swipe-content";
+    content.className = "memo-swipe-content" + (draggable ? " has-handle" : "");
     content.append(check, title, preview, date);
+
+    if (draggable) {
+      const handle = document.createElement("span");
+      handle.className = "drag-handle";
+      handle.textContent = "⠿";
+      handle.title = "ドラッグで並び替え";
+      content.appendChild(handle);
+      attachDragHandle(handle, li);
+    }
 
     const del = document.createElement("button");
     del.className = "memo-delete-btn";
@@ -455,15 +535,18 @@
   }
 
   function renderList() {
+    if (draggingRow) return; // ドラッグ中は同期による再描画で並びを壊さない
     memoList.innerHTML = "";
     openSwipeEl = null;
 
     if (currentTab === "memos") {
       const list = filteredMemos();
+      const canDrag = !selectMode && !searchQuery.trim();
       list.forEach((m) => {
         memoList.appendChild(
           buildRow({
             id: m.id,
+            draggable: canDrag,
             titleText: m.title.trim() || "無題のメモ",
             previewText: m.body.trim().split("\n")[0] || "本文なし",
             dateText: formatDate(m.updatedAt),
