@@ -50,6 +50,9 @@
   const editorPane = document.getElementById("editorPane");
   const backBtn = document.getElementById("backBtn");
   const titleInput = document.getElementById("titleInput");
+  const dueSelect = document.getElementById("dueSelect");
+  const dueDate = document.getElementById("dueDate");
+  const dueInfo = document.getElementById("dueInfo");
   const bodyInput = document.getElementById("bodyInput");
   const deleteBtn = document.getElementById("deleteBtn");
   const savedLabel = document.getElementById("savedLabel");
@@ -193,6 +196,66 @@
 
   function getMemo(id) {
     return memos.find((m) => m.id === id && !m.deleted) || null;
+  }
+
+  // --- 期日 ---
+  function endOfDay(d) {
+    const x = new Date(d);
+    x.setHours(23, 59, 59, 999);
+    return x.getTime();
+  }
+
+  function presetDue(kind) {
+    const d = new Date();
+    if (kind === "today") return endOfDay(d);
+    if (kind === "tomorrow") {
+      d.setDate(d.getDate() + 1);
+      return endOfDay(d);
+    }
+    if (kind === "week") {
+      // 日曜日を週の終わりとする
+      d.setDate(d.getDate() + ((7 - d.getDay()) % 7));
+      return endOfDay(d);
+    }
+    if (kind === "nextweek") {
+      d.setDate(d.getDate() + ((7 - d.getDay()) % 7) + 7);
+      return endOfDay(d);
+    }
+    return null;
+  }
+
+  // 期日タイムスタンプ → 表示用チップ（文言と色クラス）
+  function dueChip(due) {
+    if (typeof due !== "number") return null;
+    const now = Date.now();
+    if (due < now) return { text: "期限切れ", cls: "overdue" };
+    if (due <= presetDue("today")) return { text: "本日中", cls: "today" };
+    if (due <= presetDue("tomorrow")) return { text: "明日中", cls: "soon" };
+    if (due <= presetDue("week")) return { text: "今週中", cls: "soon" };
+    if (due <= presetDue("nextweek")) return { text: "来週中", cls: "later" };
+    const d = new Date(due);
+    return { text: `${d.getMonth() + 1}/${d.getDate()}まで`, cls: "later" };
+  }
+
+  // 期日タイムスタンプ → セレクトの選択値
+  function dueToSelectValue(due) {
+    if (typeof due !== "number") return "";
+    for (const k of ["today", "tomorrow", "week", "nextweek"]) {
+      if (due === presetDue(k)) return k;
+    }
+    return "custom";
+  }
+
+  function setDue(ts) {
+    const memo = getMemo(selectedId);
+    if (!memo) return;
+    if (ts === null) delete memo.due;
+    else memo.due = ts;
+    memo.updatedAt = Date.now();
+    delete memo.sample;
+    save();
+    pushMemo(memo);
+    render();
   }
 
   function visibleMemos() {
@@ -472,7 +535,13 @@
 
     const date = document.createElement("div");
     date.className = "memo-date";
-    date.textContent = dateText;
+    if (arguments[0].chip) {
+      const c = document.createElement("span");
+      c.className = "due-chip " + arguments[0].chip.cls;
+      c.textContent = arguments[0].chip.text;
+      date.appendChild(c);
+    }
+    date.appendChild(document.createTextNode(dateText));
 
     const check = document.createElement("span");
     check.className = "check-circle";
@@ -581,6 +650,7 @@
           buildRow({
             id: m.id,
             draggable: canDrag,
+            chip: dueChip(m.due),
             titleText: m.title.trim() || "無題のメモ",
             previewText: m.body.trim().split("\n")[0] || "本文なし",
             dateText: formatDate(m.updatedAt),
@@ -664,6 +734,27 @@
     if (titleInput.value !== memo.title) titleInput.value = memo.title;
     if (bodyInput.value !== memo.body) bodyInput.value = memo.body;
     savedLabel.textContent = "最終更新: " + formatDate(memo.updatedAt);
+
+    // 期日セレクタの表示を現在の値に合わせる
+    const dv = dueToSelectValue(memo.due);
+    dueSelect.value = dv;
+    dueDate.hidden = dv !== "custom";
+    if (dv === "custom") {
+      const d = new Date(memo.due);
+      const pad = (n) => String(n).padStart(2, "0");
+      dueDate.value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    } else {
+      dueDate.value = "";
+    }
+    const chip = dueChip(memo.due);
+    if (chip) {
+      const d = new Date(memo.due);
+      dueInfo.textContent = `${d.getMonth() + 1}/${d.getDate()}まで`;
+      dueInfo.className = "due-info " + chip.cls;
+    } else {
+      dueInfo.textContent = "";
+      dueInfo.className = "due-info";
+    }
   }
 
   function updateSyncLabel() {
@@ -1315,6 +1406,23 @@
   deleteBtn.addEventListener("click", deleteSelected);
   titleInput.addEventListener("input", updateSelected);
   bodyInput.addEventListener("input", updateSelected);
+
+  dueSelect.addEventListener("change", () => {
+    const v = dueSelect.value;
+    if (v === "custom") {
+      // 日付入力を出すだけ。日付が選ばれた時点で確定する
+      dueDate.hidden = false;
+      if (dueDate.value) setDue(endOfDay(new Date(dueDate.value + "T00:00:00")));
+      else if (dueDate.showPicker) dueDate.showPicker();
+    } else if (v === "") {
+      setDue(null);
+    } else {
+      setDue(presetDue(v));
+    }
+  });
+  dueDate.addEventListener("change", () => {
+    if (dueDate.value) setDue(endOfDay(new Date(dueDate.value + "T00:00:00")));
+  });
   searchInput.addEventListener("input", (e) => {
     searchQuery = e.target.value;
     renderList();

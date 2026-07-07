@@ -591,6 +591,74 @@ body {
   margin-bottom: 16px;
 }
 
+.due-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0 12px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.due-bar-label {
+  color: var(--text-muted);
+}
+
+.due-bar select,
+.due-bar input[type="date"] {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 8px;
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--text);
+  outline: none;
+}
+
+.due-info {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.due-info.overdue {
+  color: var(--danger);
+  font-weight: 600;
+}
+.due-info.today {
+  color: #e8710a;
+  font-weight: 600;
+}
+
+.due-chip {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 999px;
+  margin-right: 6px;
+  background: var(--bg);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+.due-chip.overdue {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+.due-chip.today {
+  background: #e8710a;
+  border-color: #e8710a;
+  color: #fff;
+}
+.due-chip.soon {
+  background: transparent;
+  border-color: #e8710a;
+  color: #e8710a;
+}
+.due-chip.later {
+  background: transparent;
+}
+
 .body-input {
   border: none;
   outline: none;

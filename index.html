@@ -43,6 +43,19 @@
       <div id="editorPane" class="editor-pane" hidden>
         <button id="backBtn" class="back-btn">← 一覧に戻る</button>
         <input type="text" id="titleInput" class="title-input" placeholder="タイトル">
+        <div class="due-bar">
+          <span class="due-bar-label">期日:</span>
+          <select id="dueSelect">
+            <option value="">なし</option>
+            <option value="today">本日中</option>
+            <option value="tomorrow">明日中</option>
+            <option value="week">今週中</option>
+            <option value="nextweek">来週中</option>
+            <option value="custom">日付を指定…</option>
+          </select>
+          <input type="date" id="dueDate" hidden>
+          <span id="dueInfo" class="due-info"></span>
+        </div>
         <textarea id="bodyInput" class="body-input" placeholder="ここに本文を入力…"></textarea>
         <div class="editor-footer">
           <span id="savedLabel" class="saved-label"></span>
