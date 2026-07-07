@@ -76,6 +76,7 @@
   const previewBody = document.getElementById("previewBody");
   const previewDownloadBtn = document.getElementById("previewDownloadBtn");
   const previewTabBtn = document.getElementById("previewTabBtn");
+  const previewDeleteBtn = document.getElementById("previewDeleteBtn");
   const previewCloseBtn = document.getElementById("previewCloseBtn");
 
   // --- Persistence (ローカルキャッシュ) ---
@@ -1218,6 +1219,17 @@
   });
   previewTabBtn.addEventListener("click", () => {
     if (previewCurrent) window.open(previewCurrent.url, "_blank");
+  });
+  previewDeleteBtn.addEventListener("click", async () => {
+    if (!previewCurrent) return;
+    const meta = previewCurrent.meta;
+    if (!confirm(`「${meta.name}」を削除しますか？`)) return;
+    try {
+      await deleteFileNow(meta);
+      closePreview();
+    } catch (e) {
+      alert("削除に失敗しました: " + (e.message || e));
+    }
   });
   loginBtn.addEventListener("click", onLoginClick);
   signupBtn.addEventListener("click", onSignupClick);

@@ -423,6 +423,14 @@ body {
 .modal-btn:hover {
   background: var(--bg);
 }
+.modal-btn.danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.modal-btn.danger:hover {
+  background: #fff0ef;
+}
+
 .modal-btn.primary {
   background: var(--accent);
   border-color: var(--accent);
