@@ -561,8 +561,9 @@
       syncLabel.className = "sync-label sync-error";
       syncLabel.title = syncErrorMsg || "";
     } else {
-      syncLabel.textContent = "リアルタイム同期中";
-      syncLabel.className = "sync-label sync-ok";
+      // 同期中は⚙ボタンの緑色で表現し、ラベルは出さない
+      syncLabel.textContent = "";
+      syncLabel.className = "sync-label";
     }
     // ⚙ボタンの色も同期状態に合わせる（同期中=緑、エラー=赤）
     syncBtn.className =

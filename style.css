@@ -80,8 +80,13 @@ body {
   transition: background 0.15s;
 }
 .icon-btn.sync-ok {
-  color: #34a853;
+  background: #34a853;
   border-color: #34a853;
+  color: #fff;
+}
+.icon-btn.sync-ok:hover {
+  background: #2d9249;
+  color: #fff;
 }
 .icon-btn.sync-error {
   color: var(--danger);
