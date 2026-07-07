@@ -15,8 +15,14 @@
         <div class="header-btns">
           <button id="syncBtn" class="icon-btn" title="同期設定">⚙</button>
           <button id="newBtn" class="new-btn" title="新しいメモ">+ 新規</button>
+          <button id="uploadBtn" class="new-btn" title="ファイルをアップロード" hidden>⬆ アップロード</button>
         </div>
       </div>
+      <div class="tabs">
+        <button id="tabMemos" class="tab active">メモ</button>
+        <button id="tabFiles" class="tab">ファイル</button>
+      </div>
+      <input type="file" id="fileInput" hidden multiple>
       <div class="search-box">
         <input type="search" id="searchInput" placeholder="メモを検索…" autocomplete="off">
       </div>
@@ -29,7 +35,7 @@
 
     <main class="editor">
       <div id="emptyState" class="empty-state">
-        <p>メモを選択するか、<br>「+ 新規」で作成してください。</p>
+        <p id="emptyStateText">メモを選択するか、<br>「+ 新規」で作成してください。</p>
       </div>
       <div id="editorPane" class="editor-pane" hidden>
         <input type="text" id="titleInput" class="title-input" placeholder="タイトル">

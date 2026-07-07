@@ -11,7 +11,9 @@ Firebaseを設定するとGoogleログインで複数端末のリアルタイム
 - メモの作成・編集・削除、タイトル・本文の全文検索
 - 入力すると自動保存（常に `localStorage` へキャッシュ、未ログインでも使えます）
 - Googleログインで複数端末のリアルタイム同期（Firebase Firestore）
-- ダークモード対応、`Ctrl` / `Cmd` + `N` で新規メモ
+- 「ファイル」タブで端末間のファイル受け渡し（1ファイル20MBまで、要ログイン。
+  ファイルはFirestoreに分割保存され、無料枠1GiBの範囲で使えます）
+- 一覧の左スワイプで削除、ダークモード対応、`Ctrl` / `Cmd` + `N` で新規メモ
 
 ## 端末間同期（Firebase）のセットアップ
 
@@ -38,14 +40,14 @@ Firebaseを設定するとGoogleログインで複数端末のリアルタイム
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /users/{userId}/memos/{memoId} {
+    match /users/{userId}/{document=**} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
   }
 }
 ```
 
-（自分のメモは自分のアカウントでしか読み書きできない、という設定です）
+（自分のデータ（メモ・ファイル）は自分のアカウントでしか読み書きできない、という設定です）
 
 ### 4. Webアプリの設定値を取得して貼り付け
 

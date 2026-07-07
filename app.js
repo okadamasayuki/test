@@ -4,26 +4,40 @@
   const STORAGE_KEY = "memo-app.memos.v1";
   const TOMBSTONE_TTL = 60 * 24 * 3600 * 1000; // 削除の記録を60日保持
   const SDK = "https://www.gstatic.com/firebasejs/10.12.2";
+  const CHUNK_CHARS = 700000; // Firestoreの1MiB制限に収まるbase64チャンク長
+  const MAX_FILE_BYTES = 20 * 1024 * 1024; // アップロード上限 20MB
 
   // --- State ---
   let memos = load();
   let selectedId = null;
   let searchQuery = "";
   let saveTimer = null;
+  let currentTab = "memos"; // "memos" | "files"
 
   // Firebase関連
   let fb = null; // { fs, db, auth, signInWithPopup, GoogleAuthProvider, signOut }
   let user = null;
   let unsubscribe = null;
+  let unsubscribeFiles = null;
   let remoteById = new Map(); // サーバ側の最新状態（差分アップロードの判定用）
   let syncState = "off"; // off | nologin | live | error
   let syncErrorMsg = null;
+
+  // ファイルタブ関連
+  let filesMeta = []; // サーバ上のファイル一覧（メタデータ）
+  let uploading = []; // [{id, name, progress}]
+  const downloadingIds = new Set();
 
   // --- Elements ---
   const memoList = document.getElementById("memoList");
   const searchInput = document.getElementById("searchInput");
   const newBtn = document.getElementById("newBtn");
+  const uploadBtn = document.getElementById("uploadBtn");
+  const fileInput = document.getElementById("fileInput");
+  const tabMemos = document.getElementById("tabMemos");
+  const tabFiles = document.getElementById("tabFiles");
   const emptyState = document.getElementById("emptyState");
+  const emptyStateText = document.getElementById("emptyStateText");
   const editorPane = document.getElementById("editorPane");
   const titleInput = document.getElementById("titleInput");
   const bodyInput = document.getElementById("bodyInput");
@@ -148,6 +162,12 @@
     return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
   }
 
+  function formatSize(bytes) {
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  }
+
   function getMemo(id) {
     return memos.find((m) => m.id === id && !m.deleted) || null;
   }
@@ -173,6 +193,13 @@
     return list;
   }
 
+  function filteredFiles() {
+    const q = searchQuery.trim().toLowerCase();
+    let list = [...filesMeta].sort((a, b) => b.createdAt - a.createdAt);
+    if (q) list = list.filter((f) => f.name.toLowerCase().includes(q));
+    return list;
+  }
+
   // --- スワイプで削除 ---
   const SWIPE_W = 80; // 削除ボタンの幅(px)
   let openSwipeEl = null;
@@ -184,7 +211,7 @@
     }
   }
 
-  function attachSwipe(content, memoId) {
+  function attachSwipe(content, onTap) {
     let active = false;
     let startX = 0;
     let startY = 0;
@@ -295,65 +322,120 @@
         closeOpenSwipe();
         if (wasSelf) return;
       }
-      selectMemo(memoId);
+      onTap();
     });
   }
 
   // --- Rendering ---
+  function buildRow({ titleText, previewText, dateText, selected, onTap, onDelete }) {
+    const li = document.createElement("li");
+    li.className = "memo-item" + (selected ? " selected" : "");
+
+    const title = document.createElement("div");
+    title.className = "memo-title";
+    title.textContent = titleText;
+
+    const preview = document.createElement("div");
+    preview.className = "memo-preview";
+    preview.textContent = previewText;
+
+    const date = document.createElement("div");
+    date.className = "memo-date";
+    date.textContent = dateText;
+
+    const content = document.createElement("div");
+    content.className = "memo-swipe-content";
+    content.append(title, preview, date);
+
+    const del = document.createElement("button");
+    del.className = "memo-delete-btn";
+    del.textContent = "削除";
+    del.addEventListener("click", (e) => {
+      e.stopPropagation();
+      onDelete();
+    });
+
+    li.append(del, content);
+    attachSwipe(content, onTap);
+    return li;
+  }
+
   function renderList() {
-    const list = filteredMemos();
     memoList.innerHTML = "";
     openSwipeEl = null;
 
-    list.forEach((m) => {
-      const li = document.createElement("li");
-      li.className = "memo-item" + (m.id === selectedId ? " selected" : "");
-      li.dataset.id = m.id;
-
-      const title = document.createElement("div");
-      title.className = "memo-title";
-      title.textContent = m.title.trim() || "無題のメモ";
-
-      const preview = document.createElement("div");
-      preview.className = "memo-preview";
-      preview.textContent = m.body.trim().split("\n")[0] || "本文なし";
-
-      const date = document.createElement("div");
-      date.className = "memo-date";
-      date.textContent = formatDate(m.updatedAt);
-
-      const content = document.createElement("div");
-      content.className = "memo-swipe-content";
-      content.append(title, preview, date);
-
-      const del = document.createElement("button");
-      del.className = "memo-delete-btn";
-      del.textContent = "削除";
-      del.addEventListener("click", (e) => {
-        e.stopPropagation();
-        deleteMemoById(m.id);
+    if (currentTab === "memos") {
+      const list = filteredMemos();
+      list.forEach((m) => {
+        memoList.appendChild(
+          buildRow({
+            titleText: m.title.trim() || "無題のメモ",
+            previewText: m.body.trim().split("\n")[0] || "本文なし",
+            dateText: formatDate(m.updatedAt),
+            selected: m.id === selectedId,
+            onTap: () => selectMemo(m.id),
+            onDelete: () => deleteMemoById(m.id),
+          })
+        );
       });
-
-      li.append(del, content);
-      attachSwipe(content, m.id);
-      memoList.appendChild(li);
-    });
-
-    const total = visibleMemos().length;
-    const shown = list.length;
-    if (searchQuery.trim() && total > 0) {
-      countLabel.textContent = `${shown} / ${total} 件`;
-    } else {
-      countLabel.textContent = `${total} 件のメモ`;
+      const total = visibleMemos().length;
+      countLabel.textContent = searchQuery.trim() && total > 0
+        ? `${list.length} / ${total} 件`
+        : `${total} 件のメモ`;
+      return;
     }
+
+    // --- ファイルタブ ---
+    if (!user) {
+      const li = document.createElement("li");
+      li.className = "list-hint";
+      li.textContent = syncState === "off"
+        ? "ファイル機能を使うにはFirebaseの設定が必要です（README参照）"
+        : "ファイル機能を使うには ⚙ からログインしてください";
+      memoList.appendChild(li);
+      countLabel.textContent = "";
+      return;
+    }
+
+    for (const u of uploading) {
+      const li = document.createElement("li");
+      li.className = "list-hint";
+      li.textContent = `⬆ ${u.name} をアップロード中… ${u.progress}%`;
+      memoList.appendChild(li);
+    }
+
+    const list = filteredFiles();
+    list.forEach((f) => {
+      memoList.appendChild(
+        buildRow({
+          titleText: f.name,
+          previewText: downloadingIds.has(f.id)
+            ? "ダウンロード中…"
+            : `${formatSize(f.size)}・タップでダウンロード`,
+          dateText: formatDate(f.createdAt),
+          selected: false,
+          onTap: () => downloadFile(f),
+          onDelete: () => deleteFile(f),
+        })
+      );
+    });
+    countLabel.textContent = `${filesMeta.length} 件のファイル`;
   }
 
   function renderEditor() {
+    if (currentTab === "files") {
+      editorPane.hidden = true;
+      emptyState.hidden = false;
+      emptyStateText.innerHTML =
+        "「⬆ アップロード」でファイルを追加できます。<br>一覧のファイルはタップでダウンロード、<br>左スワイプで削除できます。";
+      return;
+    }
     const memo = getMemo(selectedId);
     if (!memo) {
       selectedId = null;
       editorPane.hidden = true;
       emptyState.hidden = false;
+      emptyStateText.innerHTML = "メモを選択するか、<br>「+ 新規」で作成してください。";
       return;
     }
     emptyState.hidden = true;
@@ -388,7 +470,16 @@
     updateSyncLabel();
   }
 
-  // --- Actions ---
+  function switchTab(tab) {
+    currentTab = tab;
+    tabMemos.classList.toggle("active", tab === "memos");
+    tabFiles.classList.toggle("active", tab === "files");
+    newBtn.hidden = tab !== "memos";
+    uploadBtn.hidden = tab !== "files";
+    render();
+  }
+
+  // --- Actions (メモ) ---
   function createMemo() {
     const memo = {
       id: uid(),
@@ -444,6 +535,110 @@
 
   function deleteSelected() {
     deleteMemoById(selectedId);
+  }
+
+  // --- Actions (ファイル) ---
+  function bufToB64(buf) {
+    const bytes = new Uint8Array(buf);
+    let s = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(s);
+  }
+
+  function b64ToBytes(b64) {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+
+  async function uploadFiles(fileList) {
+    if (!fb || !user) {
+      alert("ファイル機能を使うにはログインしてください（⚙から）。");
+      return;
+    }
+    for (const file of fileList) {
+      if (file.size > MAX_FILE_BYTES) {
+        alert(`「${file.name}」は${formatSize(MAX_FILE_BYTES)}を超えているためアップロードできません。`);
+        continue;
+      }
+      const id = uid();
+      const entry = { id, name: file.name, progress: 0 };
+      uploading.push(entry);
+      renderList();
+      try {
+        const b64 = bufToB64(await file.arrayBuffer());
+        const chunkCount = Math.max(1, Math.ceil(b64.length / CHUNK_CHARS));
+        for (let i = 0; i < chunkCount; i++) {
+          const ref = fb.fs.doc(fb.db, "users", user.uid, "chunks", `${id}_${i}`);
+          await fb.fs.setDoc(ref, { data: b64.slice(i * CHUNK_CHARS, (i + 1) * CHUNK_CHARS) });
+          entry.progress = Math.round(((i + 1) / chunkCount) * 100);
+          renderList();
+        }
+        // メタデータは最後に書き込む（一覧には完成したファイルだけが載る）
+        const metaRef = fb.fs.doc(fb.db, "users", user.uid, "files", id);
+        await fb.fs.setDoc(metaRef, {
+          id,
+          name: file.name,
+          size: file.size,
+          type: file.type || "application/octet-stream",
+          chunkCount,
+          createdAt: Date.now(),
+        });
+      } catch (e) {
+        setSyncError(e);
+        alert(`「${file.name}」のアップロードに失敗しました: ` + (e.message || e));
+      } finally {
+        uploading = uploading.filter((u) => u !== entry);
+        renderList();
+      }
+    }
+  }
+
+  async function downloadFile(meta) {
+    if (!fb || !user || downloadingIds.has(meta.id)) return;
+    downloadingIds.add(meta.id);
+    renderList();
+    try {
+      const parts = [];
+      for (let i = 0; i < meta.chunkCount; i++) {
+        const ref = fb.fs.doc(fb.db, "users", user.uid, "chunks", `${meta.id}_${i}`);
+        const snap = await fb.fs.getDoc(ref);
+        if (!snap.exists()) throw new Error("ファイルの一部が見つかりません");
+        parts.push(snap.data().data);
+      }
+      const blob = new Blob([b64ToBytes(parts.join(""))], { type: meta.type });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = meta.name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    } catch (e) {
+      alert(`「${meta.name}」のダウンロードに失敗しました: ` + (e.message || e));
+    } finally {
+      downloadingIds.delete(meta.id);
+      renderList();
+    }
+  }
+
+  async function deleteFile(meta) {
+    if (!fb || !user) return;
+    if (!confirm(`「${meta.name}」を削除しますか？`)) return;
+    try {
+      await fb.fs.deleteDoc(fb.fs.doc(fb.db, "users", user.uid, "files", meta.id));
+      for (let i = 0; i < meta.chunkCount; i++) {
+        fb.fs
+          .deleteDoc(fb.fs.doc(fb.db, "users", user.uid, "chunks", `${meta.id}_${i}`))
+          .catch(() => {});
+      }
+    } catch (e) {
+      alert("削除に失敗しました: " + (e.message || e));
+    }
   }
 
   // --- Firebase同期 ---
@@ -519,12 +714,24 @@
       },
       setSyncError
     );
+    const filesCol = fb.fs.collection(fb.db, "users", user.uid, "files");
+    unsubscribeFiles = fb.fs.onSnapshot(
+      filesCol,
+      (snap) => {
+        filesMeta = snap.docs.map((d) => d.data());
+        if (currentTab === "files") renderList();
+      },
+      setSyncError
+    );
   }
 
   function stopListening() {
     if (unsubscribe) unsubscribe();
+    if (unsubscribeFiles) unsubscribeFiles();
     unsubscribe = null;
+    unsubscribeFiles = null;
     remoteById = new Map();
+    filesMeta = [];
   }
 
   async function initFirebase() {
@@ -557,7 +764,7 @@
           stopListening();
           syncState = "nologin";
         }
-        updateSyncLabel();
+        render();
         updateModalViews();
       });
       syncState = "nologin";
@@ -616,6 +823,14 @@
   searchInput.addEventListener("input", (e) => {
     searchQuery = e.target.value;
     renderList();
+  });
+
+  tabMemos.addEventListener("click", () => switchTab("memos"));
+  tabFiles.addEventListener("click", () => switchTab("files"));
+  uploadBtn.addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", () => {
+    if (fileInput.files.length) uploadFiles([...fileInput.files]);
+    fileInput.value = "";
   });
 
   syncBtn.addEventListener("click", openModal);
