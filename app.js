@@ -25,12 +25,78 @@
   function load() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      const data = raw ? JSON.parse(raw) : [];
+      if (raw === null) return sampleMemos(); // 初回起動時のみサンプルを投入
+      const data = JSON.parse(raw);
       return Array.isArray(data) ? data : [];
     } catch (e) {
       console.error("メモの読み込みに失敗しました", e);
       return [];
     }
+  }
+
+  function sampleMemos() {
+    const now = Date.now();
+    const HOUR = 3600 * 1000;
+    const DAY = 24 * HOUR;
+    const samples = [
+      {
+        title: "今日のToDo",
+        body: "・朝会の資料を共有\n・見積書のレビュー依頼を返す\n・経費精算（締切は今週金曜）\n・佐藤さんに議事録を送る",
+        age: 2 * HOUR,
+      },
+      {
+        title: "週次定例 議事録",
+        body: "日時: 月曜 10:00〜10:30\n参加: 開発チーム全員\n\n決定事項:\n・リリースは来週木曜に延期\n・レビュー担当を持ち回り制に変更\n\n宿題:\n・パフォーマンス計測の結果共有（担当: 自分、期限: 水曜）",
+        age: 5 * HOUR,
+      },
+      {
+        title: "1on1メモ（上長と）",
+        body: "・次の四半期は設計スキルを伸ばしたい旨を相談\n・新プロジェクトのリーダー候補の話あり\n・来月の評価面談の日程は後日調整\n\n次回までに: キャリア目標を3つ書き出す",
+        age: 1 * DAY,
+      },
+      {
+        title: "新機能のアイデア",
+        body: "・CSVエクスポート機能（顧客からの要望多数）\n・ダークモード対応\n・検索結果のハイライト表示\n・Slack通知連携 → まずは工数見積もりから",
+        age: 1 * DAY + 6 * HOUR,
+      },
+      {
+        title: "顧客打ち合わせ（A社）",
+        body: "日時: 6/30 15:00\n先方: 山田様、鈴木様\n\n要望:\n・帳票のレイアウトカスタマイズ\n・月次レポートの自動送信\n\n次回アクション: 見積もりを7/10までに提出",
+        age: 2 * DAY,
+      },
+      {
+        title: "リリース手順メモ",
+        body: "1. mainブランチのCIが緑であることを確認\n2. ステージングで動作確認\n3. リリースタグを作成\n4. デプロイ実行\n5. 本番でスモークテスト\n6. リリースノートを社内チャンネルに投稿",
+        age: 3 * DAY,
+      },
+      {
+        title: "読みたい資料・記事",
+        body: "・「達人プログラマー」第2版の後半\n・社内Wikiの新人向け設計ガイド\n・先週の技術共有会のスライド\n・競合B社の新サービスのプレスリリース",
+        age: 4 * DAY,
+      },
+      {
+        title: "出張準備チェックリスト",
+        body: "□ 新幹線の予約（往復）\n□ ホテルの手配\n□ 名刺の残数確認\n□ デモ用PCの動作確認\n□ 出張申請の提出\n□ 訪問先への事前連絡",
+        age: 5 * DAY,
+      },
+      {
+        title: "今四半期の目標（OKR）",
+        body: "O: 開発プロセスの改善\n\nKR1: レビューの平均待ち時間を2日→1日に短縮\nKR2: テストカバレッジを60%→75%に向上\nKR3: 障害の再発防止ドキュメントを毎回作成（実施率100%）",
+        age: 6 * DAY,
+      },
+      {
+        title: "障害対応の振り返り",
+        body: "発生: 先週火曜 14:20頃、API応答が遅延\n原因: バッチ処理とピーク時間帯の重複\n対応: バッチを深夜帯に移動して復旧\n\n再発防止:\n・バッチ実行時間のルールを明文化\n・遅延アラートのしきい値を見直す",
+        age: 7 * DAY,
+      },
+    ];
+    return samples.map((s, i) => ({
+      id: uid() + i.toString(36),
+      title: s.title,
+      body: s.body,
+      createdAt: now - s.age,
+      updatedAt: now - s.age,
+    }));
   }
 
   function save() {
