@@ -78,7 +78,6 @@
   const previewTitle = document.getElementById("previewTitle");
   const previewBody = document.getElementById("previewBody");
   const previewDownloadBtn = document.getElementById("previewDownloadBtn");
-  const previewTabBtn = document.getElementById("previewTabBtn");
   const previewDeleteBtn = document.getElementById("previewDeleteBtn");
   const previewCloseBtn = document.getElementById("previewCloseBtn");
 
@@ -1024,8 +1023,6 @@
       previewCurrent = { meta, blob, url };
       previewTitle.textContent = meta.name;
       previewBody.innerHTML = "";
-      // docxはブラウザが直接開けないので「新しいタブで開く」を出さない
-      previewTabBtn.hidden = isDocx(meta);
       const t = meta.type || "";
       if (t.startsWith("image/")) {
         const img = document.createElement("img");
@@ -1460,9 +1457,6 @@
   });
   previewDownloadBtn.addEventListener("click", () => {
     if (previewCurrent) triggerDownload(previewCurrent.blob, previewCurrent.meta.name);
-  });
-  previewTabBtn.addEventListener("click", () => {
-    if (previewCurrent) window.open(previewCurrent.url, "_blank");
   });
   previewDeleteBtn.addEventListener("click", async () => {
     if (!previewCurrent) return;
