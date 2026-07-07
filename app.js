@@ -565,9 +565,9 @@
       syncLabel.textContent = "";
       syncLabel.className = "sync-label";
     }
-    // ⚙ボタンの色も同期状態に合わせる（同期中=緑、エラー=赤）
+    // 設定ボタンの色も同期状態に合わせる（同期中=緑、エラー=赤）
     syncBtn.className =
-      "icon-btn" +
+      "header-btn" +
       (syncState === "live" ? " sync-ok" : syncState === "error" ? " sync-error" : "");
   }
 

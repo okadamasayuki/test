@@ -52,75 +52,50 @@ body {
 .sidebar-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 16px;
+  gap: 8px;
+  padding: 12px;
   border-bottom: 1px solid var(--border);
 }
 
-.sidebar-header h1 {
-  font-size: 18px;
-  font-weight: 700;
-}
-
-.header-btns {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.icon-btn {
+.header-btn {
+  flex: 1;
   border: 1px solid var(--border);
   background: transparent;
-  color: var(--text-muted);
-  font-size: 15px;
-  width: 30px;
-  height: 30px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 0;
   border-radius: 8px;
   cursor: pointer;
   transition: background 0.15s;
+  white-space: nowrap;
 }
-.icon-btn.sync-ok {
+.header-btn:hover {
+  background: var(--bg);
+}
+.header-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #1d1d1f;
+}
+.header-btn.primary:hover {
+  background: var(--accent-hover);
+}
+.header-btn.active {
+  background: var(--selected);
+  border-color: var(--accent);
+}
+.header-btn.sync-ok {
   background: #34a853;
   border-color: #34a853;
   color: #fff;
 }
-.icon-btn.sync-ok:hover {
+.header-btn.sync-ok:hover {
   background: #2d9249;
-  color: #fff;
 }
-.icon-btn.sync-error {
+.header-btn.sync-error {
   color: var(--danger);
   border-color: var(--danger);
-}
-
-.icon-btn.select-toggle {
-  width: auto;
-  padding: 0 10px;
-  font-size: 13px;
-}
-.icon-btn.select-toggle.active {
-  background: var(--selected);
-  color: var(--text);
-  border-color: var(--accent);
-}
-.icon-btn:hover {
-  background: var(--bg);
-  color: var(--text);
-}
-
-.new-btn {
-  border: none;
-  background: var(--accent);
-  color: var(--text);
-  font-weight: 600;
-  font-size: 13px;
-  padding: 6px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.new-btn:hover {
-  background: var(--accent-hover);
 }
 
 .tabs {

@@ -11,13 +11,10 @@
   <div class="app">
     <aside class="sidebar">
       <div class="sidebar-header">
-        <h1>メモ帳</h1>
-        <div class="header-btns">
-          <button id="selectBtn" class="icon-btn select-toggle" title="選択して一括削除">選択</button>
-          <button id="syncBtn" class="icon-btn" title="同期設定">⚙</button>
-          <button id="newBtn" class="new-btn" title="新しいメモ">+ 新規</button>
-          <button id="uploadBtn" class="new-btn" title="ファイルをアップロード" hidden>⬆ アップロード</button>
-        </div>
+        <button id="selectBtn" class="header-btn" title="選択して一括削除">選択</button>
+        <button id="newBtn" class="header-btn primary" title="新しいメモ">+ 新規</button>
+        <button id="uploadBtn" class="header-btn primary" title="ファイルをアップロード" hidden>⬆ アップロード</button>
+        <button id="syncBtn" class="header-btn" title="同期設定">設定</button>
       </div>
       <div class="tabs">
         <button id="tabMemos" class="tab active">メモ</button>
