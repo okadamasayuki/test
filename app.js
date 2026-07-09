@@ -1394,6 +1394,11 @@
     ["samples/word-houkoku.docx", "業務報告書_2026年6月.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
     ["samples/word-tejunsho.docx", "手順書_リリース作業.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
     ["samples/word-keiyaku.docx", "契約書テンプレート.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+    ["samples/excel-keihi.xlsx", "経費精算_2026年6月.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+    ["samples/excel-uriage.xlsx", "売上集計_2026年上期.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+    ["samples/excel-zaiko.xlsx", "在庫リスト.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+    ["samples/excel-kintai.xlsx", "勤怠管理_2026年6月.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+    ["samples/excel-kokyaku.xlsx", "顧客リスト.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
   ];
 
   async function seedSampleData() {
