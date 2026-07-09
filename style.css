@@ -1,4 +1,7 @@
 :root {
+  /* フォーム部品(カーソル・検索欄の✕・スクロールバー)をOSのテーマに追従させる。
+     これが無いとダークモードでもブラウザが明色前提で描く。 */
+  color-scheme: light dark;
   --bg: #f5f5f7;
   --sidebar-bg: #ffffff;
   --border: #e2e2e6;
@@ -292,7 +295,13 @@ body {
   padding: 8px 10px;
   font-size: 13px;
   background: var(--bg);
+  /* colorが無いとダークモードで背景(暗)にブラウザ既定の黒文字が乗り、
+     ほぼ読めなくなる。モーダルの入力欄と同じ指定を揃える。 */
+  color: var(--text);
   outline: none;
+}
+.search-box input::placeholder {
+  color: var(--text-muted);
 }
 .search-box input:focus {
   border-color: var(--accent);

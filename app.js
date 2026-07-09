@@ -490,7 +490,7 @@
 
     aiBusy = true;
     aiBar.hidden = false;
-    aiBarText.textContent = "✨ AI検索を実行しています…";
+    aiBarText.textContent = "AI検索を実行しています…";
     aiBarClose.hidden = true;
     try {
       const result = await requestAiSearch(query, visibleMemos());
@@ -512,7 +512,7 @@
     aiBar.hidden = false;
     aiBarClose.hidden = false;
     aiBarText.textContent =
-      `✨ AI検索: ${aiResult.query}` +
+      `AI検索: ${aiResult.query}` +
       (aiResult.truncated > 0 ? `（更新の古い${aiResult.truncated}件は対象外）` : "");
   }
 
