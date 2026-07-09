@@ -330,7 +330,7 @@
   // 注意: Haiku 4.5 は thinking:{type:"adaptive"} と output_config.effort を
   // 受け付けない世代なので、リクエストにこの2つを入れないこと(400になる)。
   const PROOFREAD_MODEL = "claude-haiku-4-5";
-  const PROOFREAD_MIN_BODY_CHARS = 20;
+  const PROOFREAD_MIN_BODY_CHARS = 10;
   const PROOFREAD_MAX_BODY_CHARS = 20000;
   const PROOFREAD_IDLE_MS = 3000;
   const PROOFREAD_UNDO_VISIBLE_MS = 12000;
@@ -338,9 +338,13 @@
   const PROOFREAD_SYSTEM_PROMPT =
     "あなたは日本語の校正者です。渡されたメモの本文について、次の作業をしてください。" +
     "\n\n" +
-    "1. corrected: 誤字・脱字・変換ミス・明らかな入力ミスだけを直した本文を返す。" +
-    "内容の追加や削除、語順や言い回しの変更、要約は禁止です。" +
-    "改行・箇条書き・記号・全角半角などの書式はそのまま保ってください。" +
+    "1. corrected: 誤字・脱字・変換ミス・明らかな入力ミスを直し、" +
+    "話し言葉を簡潔な書き言葉（常体）に整えた本文を返す。" +
+    "「えーと」「あの」などの言いよどみは取り除き、" +
+    "「〜じゃん」「〜だよね」「してる」のような話し言葉は" +
+    "「〜だ」「している」のような書き言葉に直します。" +
+    "内容の追加や削除、要約は禁止です。事実・数字・固有名詞は変えないでください。" +
+    "改行・箇条書き・記号などの構造はそのまま保ってください。" +
     "直すところが無ければ、渡された本文をそのまま返します。" +
     "\n\n" +
     "2. changes: 直した箇所を before/after の組で列挙する。直していなければ空配列。" +
@@ -390,7 +394,7 @@
   }
 
   function changesLabel(count) {
-    return count > 0 ? `${count}箇所を修正しました` : "誤字は見つかりませんでした";
+    return count > 0 ? `${count}箇所を修正しました` : "直すところはありませんでした";
   }
 
   // 既定はオン。切りたければ設定から。
