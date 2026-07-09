@@ -326,7 +326,10 @@
   //  3. 変えていないのに何度も課金される  → 前回送った本文と同じなら走らない
 
   const PROOFREAD_ENABLED_STORAGE = "memo-app.auto-proofread.v1";
-  const PROOFREAD_MODEL = "claude-opus-4-8";
+  // 自動整形は入力が止まるたびに走って課金されるため、安いHaikuを使う(opusの約1/5)。
+  // 注意: Haiku 4.5 は thinking:{type:"adaptive"} と output_config.effort を
+  // 受け付けない世代なので、リクエストにこの2つを入れないこと(400になる)。
+  const PROOFREAD_MODEL = "claude-haiku-4-5";
   const PROOFREAD_MIN_BODY_CHARS = 20;
   const PROOFREAD_MAX_BODY_CHARS = 20000;
   const PROOFREAD_IDLE_MS = 3000;
@@ -416,9 +419,8 @@
         body: JSON.stringify({
           model: PROOFREAD_MODEL,
           max_tokens: 8192,
-          thinking: { type: "adaptive" },
+          // Haiku 4.5 は adaptive thinking と effort に非対応(送ると400)。
           output_config: {
-            effort: "low",
             format: { type: "json_schema", schema: PROOFREAD_SCHEMA },
           },
           system: PROOFREAD_SYSTEM_PROMPT,
