@@ -64,13 +64,13 @@
   const dueInfo = document.getElementById("dueInfo");
   const bodyInput = document.getElementById("bodyInput");
   const copyBodyBtn = document.getElementById("copyBodyBtn");
+  const proofreadBtn = document.getElementById("proofreadBtn");
   const linkBar = document.getElementById("linkBar");
   const translationPane = document.getElementById("translationPane");
   const translationText = document.getElementById("translationText");
   const proofBar = document.getElementById("proofBar");
   const proofBarText = document.getElementById("proofBarText");
   const proofBarUndo = document.getElementById("proofBarUndo");
-  const autoProofreadCheck = document.getElementById("autoProofreadCheck");
   const deleteBtn = document.getElementById("deleteBtn");
   const savedLabel = document.getElementById("savedLabel");
   const countLabel = document.getElementById("countLabel");
@@ -327,20 +327,12 @@
   // --- 本文の自動整形(誤字脱字の修正 + タイトルの自動生成) ---
   //
   // iOSアプリの src/lib/proofreadContent.ts / proofread.ts と同じロジック。
-  // 入力が止まったら自動で走り、本文を直接書き換える。自動で課金され、かつ
-  // ユーザーの文章を書き換えるので、暴走しないための判定を持つ:
-  //  1. 整形後の本文でまた走る無限ループ  → 直前の整形結果と同じなら走らない
-  //  2. 書きかけの短文を勝手に直される    → 一定の長さに満たなければ走らない
-  //  3. 変えていないのに何度も課金される  → 前回送った本文と同じなら走らない
-
-  const PROOFREAD_ENABLED_STORAGE = "memo-app.auto-proofread.v1";
-  // 自動整形は入力が止まるたびに走って課金されるため、安いHaikuを使う(opusの約1/5)。
+  // 「✨ AI整形」ボタンを押したときだけ走る(以前は入力停止で自動実行していた)。
+  // 誤字修正は単純なタスクなので安いHaikuを使う(opusの約1/5)。
   // 注意: Haiku 4.5 は thinking:{type:"adaptive"} と output_config.effort を
   // 受け付けない世代なので、リクエストにこの2つを入れないこと(400になる)。
   const PROOFREAD_MODEL = "claude-haiku-4-5";
-  const PROOFREAD_MIN_BODY_CHARS = 10;
   const PROOFREAD_MAX_BODY_CHARS = 20000;
-  const PROOFREAD_IDLE_MS = 3000;
   const PROOFREAD_UNDO_VISIBLE_MS = 12000;
 
   const PROOFREAD_SYSTEM_PROMPT =
@@ -383,17 +375,6 @@
     additionalProperties: false,
   };
 
-  const EMPTY_PROOFREAD_MEMORY = { lastSent: null, lastCorrected: null };
-
-  function shouldRunProofread(body, memory) {
-    const trimmed = body.trim();
-    if (trimmed.length < PROOFREAD_MIN_BODY_CHARS) return false;
-    if (trimmed.length > PROOFREAD_MAX_BODY_CHARS) return false;
-    if (memory.lastCorrected !== null && body === memory.lastCorrected) return false;
-    if (memory.lastSent !== null && body === memory.lastSent) return false;
-    return true;
-  }
-
   // タイトルは空のときだけ入れる。自分で付けたタイトルを消さない。
   function pickTitle(currentTitle, suggested) {
     if (currentTitle.trim() !== "") return null;
@@ -407,15 +388,6 @@
 
   function changesLabel(count) {
     return count > 0 ? `${count}箇所を修正しました` : "直すところはありませんでした";
-  }
-
-  // 既定はオン。切りたければ設定から。
-  function isProofreadEnabled() {
-    return localStorage.getItem(PROOFREAD_ENABLED_STORAGE) !== "off";
-  }
-
-  function setProofreadEnabled(on) {
-    localStorage.setItem(PROOFREAD_ENABLED_STORAGE, on ? "on" : "off");
   }
 
   async function requestProofread(body) {
@@ -484,8 +456,6 @@
     };
   }
 
-  let proofreadMemory = { ...EMPTY_PROOFREAD_MEMORY };
-  let proofreadTimer = null;
   let proofreadBusy = false;
   let proofreadUndoBody = null;
   let proofreadUndoTranslation = null;
@@ -511,8 +481,6 @@
 
   function undoProofread() {
     if (proofreadUndoBody === null) return;
-    // 戻した本文でまた整形が走らないよう、送信済みとして記録しておく
-    proofreadMemory = { lastSent: proofreadUndoBody, lastCorrected: proofreadUndoBody };
     bodyInput.value = proofreadUndoBody;
     // 英訳も整形前のものに戻す
     const memo = getMemo(selectedId);
@@ -533,17 +501,22 @@
 
   async function runProofread() {
     const memo = getMemo(selectedId);
-    if (!memo) return;
+    if (!memo || proofreadBusy) return;
     const sent = bodyInput.value;
+    if (!sent.trim()) return;
+    if (sent.trim().length > PROOFREAD_MAX_BODY_CHARS) {
+      showProofBar("本文が長すぎて整形できません。", false, true);
+      scheduleProofBarHide();
+      return;
+    }
     proofreadBusy = true;
+    proofreadBtn.disabled = true;
+    proofreadBtn.textContent = "整形中…";
     showProofBar("整形しています…", false, false);
-    proofreadMemory = { ...proofreadMemory, lastSent: sent };
     try {
       const result = await requestProofread(sent);
       // 待っているあいだにユーザーが打ち直していたら、古い結果で上書きしない
       if (bodyInput.value !== sent || getMemo(selectedId) !== memo) return;
-
-      proofreadMemory = { lastSent: sent, lastCorrected: result.corrected };
 
       let applied = false;
       if (bodyChanged(sent, result.corrected)) {
@@ -573,26 +546,18 @@
       scheduleProofBarHide();
     } finally {
       proofreadBusy = false;
+      proofreadBtn.disabled = false;
+      proofreadBtn.textContent = "✨ AI整形";
     }
   }
 
   function resetProofread() {
-    clearTimeout(proofreadTimer);
     clearTimeout(proofreadUndoTimer);
-    proofreadMemory = { ...EMPTY_PROOFREAD_MEMORY };
     proofreadUndoBody = null;
     proofreadUndoTranslation = null;
     proofBar.hidden = true;
     translationPane.hidden = true;
     translationText.textContent = "";
-  }
-
-  // 入力が止まってから走らせる
-  function scheduleProofread() {
-    clearTimeout(proofreadTimer);
-    if (proofreadBusy || !getAnthropicKey() || !isProofreadEnabled()) return;
-    if (!shouldRunProofread(bodyInput.value, proofreadMemory)) return;
-    proofreadTimer = setTimeout(runProofread, PROOFREAD_IDLE_MS);
   }
 
   // --- AI意味検索 ---
@@ -1719,6 +1684,7 @@
     // 他端末からの反映時に入力中のカーソルを壊さないよう、値が違う時だけ入れ替える
     if (titleInput.value !== memo.title) titleInput.value = memo.title;
     if (bodyInput.value !== memo.body) bodyInput.value = memo.body;
+    proofreadBtn.hidden = !getAnthropicKey();
     renderLinks();
     renderTranslation(memo);
     savedLabel.textContent = "最終更新: " + formatDate(memo.updatedAt);
@@ -2828,7 +2794,6 @@
 
   // --- Sync modal ---
   function updateAutoProofreadCheck() {
-    autoProofreadCheck.checked = isProofreadEnabled();
   }
 
   function updateAiSearchBtn() {
@@ -3032,9 +2997,9 @@
   titleInput.addEventListener("input", updateSelected);
   bodyInput.addEventListener("input", () => {
     updateSelected();
-    scheduleProofread();
     renderLinks();
   });
+  proofreadBtn.addEventListener("click", runProofread);
   proofBarUndo.addEventListener("click", undoProofread);
   copyBodyBtn.addEventListener("click", async () => {
     try {
@@ -3047,10 +3012,6 @@
       alert("コピーできませんでした: " + (e?.message || e));
     }
   });
-  autoProofreadCheck.addEventListener("change", () => {
-    setProofreadEnabled(autoProofreadCheck.checked);
-  });
-
   dueSelect.addEventListener("change", () => {
     const v = dueSelect.value;
     if (v === "custom") {

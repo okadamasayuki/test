@@ -76,6 +76,7 @@
         </div>
         <div class="editor-footer">
           <span id="savedLabel" class="saved-label"></span>
+          <button id="proofreadBtn" class="copy-body-btn" hidden>✨ AI整形</button>
           <button id="copyBodyBtn" class="copy-body-btn">コピー</button>
           <button id="deleteBtn" class="delete-btn">削除</button>
         </div>
@@ -128,12 +129,8 @@
           <input type="password" id="anthropicKeyInput" autocomplete="off" placeholder="sk-ant-…">
         </label>
         <button id="anthropicKeySaveBtn" class="modal-btn">キーを保存</button>
-        <label class="modal-check">
-          <input type="checkbox" id="autoProofreadCheck">
-          本文の自動整形（入力が止まったら誤字を直し、タイトルが空なら要約を入れ、英訳を下に表示する。そのたびに課金されます）
-        </label>
         <p class="modal-desc anthropic-key-note">
-          キーはこのブラウザにだけ保存されます。要約の生成にはAnthropicの従量課金（1ファイルにつき数円程度）がかかります。
+          キーはこのブラウザにだけ保存されます。要約・AI検索・AI整形にはAnthropicの従量課金がかかります。整形は編集欄の「✨ AI整形」ボタンを押したときだけ実行されます。
         </p>
       </div>
       <p id="syncModalStatus" class="modal-status"></p>
