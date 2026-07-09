@@ -68,6 +68,9 @@
   const loginBtn = document.getElementById("loginBtn");
   const logoutBtn = document.getElementById("logoutBtn");
   const seedBtn = document.getElementById("seedBtn");
+  const anthropicKeyInput = document.getElementById("anthropicKeyInput");
+  const anthropicKeySaveBtn = document.getElementById("anthropicKeySaveBtn");
+  const anthropicKeyState = document.getElementById("anthropicKeyState");
   const emailInput = document.getElementById("emailInput");
   const passwordInput = document.getElementById("passwordInput");
   const signupBtn = document.getElementById("signupBtn");
@@ -994,7 +997,7 @@
     }
   }
 
-  async function fetchFileBlob(meta) {
+  async function fetchFileBase64(meta) {
     const parts = [];
     for (let i = 0; i < meta.chunkCount; i++) {
       const ref = fb.fs.doc(fb.db, "users", user.uid, "chunks", `${meta.id}_${i}`);
@@ -1002,7 +1005,11 @@
       if (!snap.exists()) throw new Error("ファイルの一部が見つかりません");
       parts.push(snap.data().data);
     }
-    return new Blob([b64ToBytes(parts.join(""))], { type: meta.type });
+    return parts.join("");
+  }
+
+  async function fetchFileBlob(meta) {
+    return new Blob([b64ToBytes(await fetchFileBase64(meta))], { type: meta.type });
   }
 
   function triggerDownload(blob, name) {
@@ -1321,6 +1328,237 @@
     return mammothLoading;
   }
 
+  // --- AI要約（Claude API） ---
+  //
+  // iOSアプリ(src/lib/summaryContent.ts / summary.ts)と同じプロンプト・同じ
+  // リクエスト形にすること。キーはこのブラウザのlocalStorageにだけ保存する。
+  // 生成結果は users/{uid}/summaries/{fileId} にキャッシュし、iOSと共有する。
+
+  const ANTHROPIC_KEY_STORAGE = "memo-app.anthropic-key.v1";
+  const SUMMARY_MODEL = "claude-opus-4-8";
+  const SUMMARY_SYSTEM_PROMPT =
+    "ユーザーが送るファイルの内容を日本語で3〜4文に要約してください。" +
+    "書式やファイル形式の説明ではなく、書かれている中身の要点（金額・日付・決定事項など）を伝えてください。" +
+    "前置きは不要で、要約本文だけを返してください。";
+  const SUMMARY_MAX_TEXT_CHARS = 50000;
+  const SUMMARY_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+
+  function getAnthropicKey() {
+    return localStorage.getItem(ANTHROPIC_KEY_STORAGE) || "";
+  }
+
+  function summaryTruncate(text) {
+    if (text.length <= SUMMARY_MAX_TEXT_CHARS) return text;
+    return (
+      text.slice(0, SUMMARY_MAX_TEXT_CHARS) +
+      "\n\n（長いため以降は省略。ここまでの内容で要約してください）"
+    );
+  }
+
+  function summaryTextBlock(name, body) {
+    return { type: "text", text: `ファイル名: ${name}\n---\n${summaryTruncate(body)}` };
+  }
+
+  // 要約対象か(プレビュー可能な種別のうち、Claudeが読めるもの)
+  function summarizable(meta) {
+    const t = meta.type || "";
+    if (t.startsWith("image/")) return SUMMARY_IMAGE_TYPES.includes(t);
+    return previewable(meta);
+  }
+
+  async function buildSummaryContent(meta, base64) {
+    const t = meta.type || "";
+    if (t === "application/pdf") {
+      return [
+        { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } },
+        { type: "text", text: `このPDF（ファイル名: ${meta.name}）を要約してください。` },
+      ];
+    }
+    if (t.startsWith("image/")) {
+      if (!SUMMARY_IMAGE_TYPES.includes(t)) {
+        throw new Error(`この画像形式（${t}）は要約に対応していません`);
+      }
+      return [
+        { type: "image", source: { type: "base64", media_type: t, data: base64 } },
+        { type: "text", text: `この画像（ファイル名: ${meta.name}）に写っている内容を要約してください。` },
+      ];
+    }
+    if (isDocx(meta)) {
+      const mammoth = await loadMammoth();
+      const result = await mammoth.extractRawText({ arrayBuffer: b64ToBytes(base64).buffer });
+      return [summaryTextBlock(meta.name, result.value)];
+    }
+    if (isXlsx(meta)) {
+      await loadFflate();
+      const sheet = readXlsx(b64ToBytes(base64));
+      const rows = sheet.rows.map((r) => r.map((c) => c.text).join("\t")).join("\n");
+      return [summaryTextBlock(meta.name, `シート「${sheet.name}」\n${rows}`)];
+    }
+    // text / json
+    return [summaryTextBlock(meta.name, new TextDecoder().decode(b64ToBytes(base64)))];
+  }
+
+  function summaryStatusErrMsg(status, apiMessage) {
+    switch (status) {
+      case 401:
+        return "APIキーが正しくありません。⚙の設定で確認してください。";
+      case 429:
+        return "利用制限中です。しばらく待ってからお試しください。";
+      case 400:
+        return "このファイルは要約できませんでした（サイズ超過などの可能性）。";
+      case 413:
+        return "ファイルが大きすぎて要約できません。";
+      case 529:
+        return "APIが混み合っています。しばらく待ってからお試しください。";
+      default:
+        return `APIエラー (${status}): ${apiMessage}`;
+    }
+  }
+
+  async function requestSummary(meta, base64) {
+    const apiKey = getAnthropicKey();
+    if (!apiKey) throw new Error("APIキーが設定されていません（⚙から設定）");
+    const content = await buildSummaryContent(meta, base64);
+
+    let res;
+    try {
+      res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+          // ブラウザから直接呼ぶためのCORSオプトイン(Anthropic側の許可条件)
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model: SUMMARY_MODEL,
+          max_tokens: 1024,
+          thinking: { type: "adaptive" },
+          output_config: { effort: "low" },
+          system: SUMMARY_SYSTEM_PROMPT,
+          messages: [{ role: "user", content }],
+        }),
+      });
+    } catch (e) {
+      throw new Error("ネットワークに接続できません。通信環境を確認してください。");
+    }
+
+    if (!res.ok) {
+      let apiMessage = "";
+      try {
+        apiMessage = (await res.json()).error?.message || "";
+      } catch (e) {
+        /* JSONでないエラー本文は無視 */
+      }
+      throw new Error(summaryStatusErrMsg(res.status, apiMessage));
+    }
+
+    const data = await res.json();
+    if (data.stop_reason === "refusal") {
+      throw new Error("このファイルの要約は生成できませんでした。");
+    }
+    const text = data.content
+      .filter((b) => b.type === "text")
+      .map((b) => b.text || "")
+      .join("")
+      .trim();
+    if (!text) throw new Error("要約が空でした。もう一度お試しください。");
+    return data.stop_reason === "max_tokens" ? text + "…（末尾が切れています）" : text;
+  }
+
+  async function loadSummaryCache(fileId) {
+    try {
+      const snap = await fb.fs.getDoc(fb.fs.doc(fb.db, "users", user.uid, "summaries", fileId));
+      return snap.exists() ? snap.data().summary || null : null;
+    } catch (e) {
+      return null; // 読めなければ生成し直せばよい
+    }
+  }
+
+  function saveSummaryCache(fileId, summary) {
+    fb.fs
+      .setDoc(fb.fs.doc(fb.db, "users", user.uid, "summaries", fileId), {
+        fileId,
+        summary,
+        model: SUMMARY_MODEL,
+        createdAt: Date.now(),
+      })
+      .catch(() => {});
+  }
+
+  // プレビュー上部に置くAI要約カード。キャッシュ確認・生成・再生成をここで完結する
+  function buildSummaryCard(meta, base64) {
+    const card = document.createElement("div");
+    card.className = "summary-card";
+
+    const head = document.createElement("div");
+    head.className = "summary-head";
+    const title = document.createElement("span");
+    title.className = "summary-title";
+    title.textContent = "✨ AI要約";
+    head.appendChild(title);
+    card.appendChild(head);
+
+    const body = document.createElement("div");
+    body.className = "summary-body";
+    card.appendChild(body);
+
+    const setError = (msg) => {
+      const p = document.createElement("p");
+      p.className = "summary-error";
+      p.textContent = msg;
+      body.appendChild(p);
+    };
+
+    const showText = (text) => {
+      body.innerHTML = "";
+      const p = document.createElement("p");
+      p.className = "summary-text";
+      p.textContent = text;
+      body.appendChild(p);
+      const regen = document.createElement("button");
+      regen.className = "summary-regen";
+      regen.textContent = "再生成 ↻";
+      regen.addEventListener("click", generate);
+      head.appendChild(regen);
+    };
+
+    const generate = async () => {
+      head.querySelector(".summary-regen")?.remove();
+      body.innerHTML = "";
+      const p = document.createElement("p");
+      p.className = "summary-loading";
+      p.textContent = "要約を生成しています…";
+      body.appendChild(p);
+      try {
+        const summary = await requestSummary(meta, base64);
+        saveSummaryCache(meta.id, summary);
+        showText(summary);
+      } catch (e) {
+        body.innerHTML = "";
+        setError(String(e?.message || e));
+        addGenerateButton();
+      }
+    };
+
+    const addGenerateButton = () => {
+      const btn = document.createElement("button");
+      btn.className = "summary-generate modal-btn";
+      btn.textContent = "要約を生成";
+      btn.addEventListener("click", generate);
+      body.appendChild(btn);
+    };
+
+    // キャッシュがあれば即表示、なければ生成ボタン(勝手にAPIを呼ばない)
+    loadSummaryCache(meta.id).then((cached) => {
+      if (cached) showText(cached);
+      else addGenerateButton();
+    });
+
+    return card;
+  }
+
   let previewCurrent = null; // { meta, blob, url }
 
   async function previewFile(meta) {
@@ -1328,11 +1566,15 @@
     downloadingIds.add(meta.id);
     renderList();
     try {
-      const blob = await fetchFileBlob(meta);
+      const base64 = await fetchFileBase64(meta);
+      const blob = new Blob([b64ToBytes(base64)], { type: meta.type });
       const url = URL.createObjectURL(blob);
       previewCurrent = { meta, blob, url };
       previewTitle.textContent = meta.name;
       previewBody.innerHTML = "";
+      if (getAnthropicKey() && summarizable(meta)) {
+        previewBody.appendChild(buildSummaryCard(meta, base64));
+      }
       const t = meta.type || "";
       if (t.startsWith("image/")) {
         const img = document.createElement("img");
@@ -1385,6 +1627,8 @@
         .deleteDoc(fb.fs.doc(fb.db, "users", user.uid, "chunks", `${meta.id}_${i}`))
         .catch(() => {});
     }
+    // AI要約のキャッシュも掃除する(無ければ何も起きない)
+    fb.fs.deleteDoc(fb.fs.doc(fb.db, "users", user.uid, "summaries", meta.id)).catch(() => {});
   }
 
   async function deleteFile(meta) {
@@ -1534,7 +1778,15 @@
   }
 
   // --- Sync modal ---
+  function updateAnthropicKeyState() {
+    anthropicKeyState.textContent = getAnthropicKey() ? "・設定済み" : "";
+    anthropicKeyInput.placeholder = getAnthropicKey()
+      ? "変更する場合は新しいキーを入力（空で保存すると削除）"
+      : "sk-ant-…";
+  }
+
   function updateModalViews() {
+    updateAnthropicKeyState();
     syncSetupView.hidden = !(syncState === "off");
     syncLoginView.hidden = !(syncState !== "off" && !user);
     syncUserView.hidden = !user;
@@ -1800,6 +2052,19 @@
   resetLink.addEventListener("click", onResetClick);
   logoutBtn.addEventListener("click", onLogoutClick);
   seedBtn.addEventListener("click", seedSampleData);
+  anthropicKeySaveBtn.addEventListener("click", () => {
+    const key = anthropicKeyInput.value.trim();
+    if (key) {
+      localStorage.setItem(ANTHROPIC_KEY_STORAGE, key);
+      syncModalStatus.textContent =
+        "APIキーを保存しました。ファイルのプレビューに「AI要約」が表示されます。";
+    } else if (getAnthropicKey()) {
+      localStorage.removeItem(ANTHROPIC_KEY_STORAGE);
+      syncModalStatus.textContent = "APIキーを削除しました。";
+    }
+    anthropicKeyInput.value = "";
+    updateAnthropicKeyState();
+  });
   syncModal.addEventListener("click", (e) => {
     if (e.target === syncModal) closeModal();
   });

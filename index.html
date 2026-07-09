@@ -106,6 +106,14 @@
           <button id="seedBtn" class="modal-btn">サンプルデータを投入</button>
           <button id="logoutBtn" class="modal-btn">ログアウト</button>
         </div>
+        <label class="modal-label anthropic-key-label">
+          AI要約（Claude APIキー）<span id="anthropicKeyState"></span>
+          <input type="password" id="anthropicKeyInput" autocomplete="off" placeholder="sk-ant-…">
+        </label>
+        <button id="anthropicKeySaveBtn" class="modal-btn">キーを保存</button>
+        <p class="modal-desc anthropic-key-note">
+          キーはこのブラウザにだけ保存されます。要約の生成にはAnthropicの従量課金（1ファイルにつき数円程度）がかかります。
+        </p>
       </div>
       <p id="syncModalStatus" class="modal-status"></p>
       <div class="modal-actions">
