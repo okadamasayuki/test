@@ -14,7 +14,8 @@
   let saveTimer = null;
   const TAB_KEY = "memo-app.tab.v1";
   // リロードしても選択中のタブを維持する
-  let currentTab = localStorage.getItem(TAB_KEY) === "files" ? "files" : "memos";
+  const savedTab = localStorage.getItem(TAB_KEY);
+  let currentTab = savedTab === "files" || savedTab === "saved" ? savedTab : "memos";
   let selectMode = false; // 一括削除の選択モード
   const checkedIds = new Set();
 
@@ -49,6 +50,7 @@
   const uploadBtn = document.getElementById("uploadBtn");
   const fileInput = document.getElementById("fileInput");
   const tabMemos = document.getElementById("tabMemos");
+  const tabSaved = document.getElementById("tabSaved");
   const tabFiles = document.getElementById("tabFiles");
   const emptyState = document.getElementById("emptyState");
   const emptyStateText = document.getElementById("emptyStateText");
@@ -745,7 +747,7 @@
   }
 
   function memoFingerprint() {
-    const live = visibleMemos();
+    const live = tabScopedMemos();
     return `${live.length}:${live.reduce((max, m) => Math.max(max, m.updatedAt), 0)}`;
   }
 
@@ -757,9 +759,9 @@
 
   async function executeAiSearch() {
     const query = searchQuery.trim();
-    if (!query || aiBusy || currentTab !== "memos" || !getAnthropicKey()) return;
+    if (!query || aiBusy || currentTab === "files" || !getAnthropicKey()) return;
 
-    const cacheKey = `${memoFingerprint()} ${query}`;
+    const cacheKey = `${currentTab} ${memoFingerprint()} ${query}`;
     if (aiCache.has(cacheKey)) {
       aiResult = aiCache.get(cacheKey);
       showAiBar();
@@ -772,7 +774,7 @@
     aiBarText.textContent = "AI検索を実行しています…";
     aiBarClose.hidden = true;
     try {
-      const result = await requestAiSearch(query, visibleMemos());
+      const result = await requestAiSearch(query, tabScopedMemos());
       aiCache.set(cacheKey, result);
       aiResult = result;
       showAiBar();
@@ -945,6 +947,11 @@
     return [starts[hit], ends[hit + needle.length - 1]];
   }
 
+  // いま開いているメモ系タブ(メモ/保存用)に属するメモだけを返す
+  function tabScopedMemos() {
+    return sortedMemos().filter((m) => (currentTab === "saved" ? !!m.saved : !m.saved));
+  }
+
   // ローカル検索とAI検索のどちらでも、行に渡す形(抜粋+蛍光範囲)に揃える
   function memoRows() {
     if (aiResult) {
@@ -955,7 +962,7 @@
       }));
     }
     const terms = searchTerms(searchQuery.trim());
-    const list = sortedMemos();
+    const list = tabScopedMemos();
     if (terms.length === 0) {
       return list.map((m) => ({ memo: m, titleRanges: [], preview: makeSnippet(m.body, []) }));
     }
@@ -980,8 +987,9 @@
     return list;
   }
 
-  // --- スワイプで削除 ---
+  // --- スワイプで削除(左) / 保存用へ移動(右) ---
   const SWIPE_W = 80; // 削除ボタンの幅(px)
+  const SAVE_W = 96; // 保存用ラベルの幅(px)
   let openSwipeEl = null;
 
   function closeOpenSwipe() {
@@ -991,7 +999,7 @@
     }
   }
 
-  function attachSwipe(content, onTap) {
+  function attachSwipe(content, onTap, onSave) {
     let active = false;
     let startX = 0;
     let startY = 0;
@@ -1024,7 +1032,7 @@
       }
       if (mode === "swipe") {
         dragged = true;
-        const off = Math.max(-SWIPE_W, Math.min(0, base + dx));
+        const off = Math.max(-SWIPE_W, Math.min(onSave ? SAVE_W : 0, base + dx));
         content.style.transform = `translateX(${off}px)`;
         return true;
       }
@@ -1037,7 +1045,11 @@
       if (mode === "swipe") {
         content.style.transition = "";
         const off = base + (x - startX);
-        if (off < -SWIPE_W / 2) {
+        if (onSave && off > SAVE_W / 2) {
+          content.style.transform = "";
+          if (openSwipeEl === content) openSwipeEl = null;
+          onSave();
+        } else if (off < -SWIPE_W / 2) {
           if (openSwipeEl && openSwipeEl !== content) closeOpenSwipe();
           content.style.transform = `translateX(-${SWIPE_W}px)`;
           openSwipeEl = content;
@@ -1224,7 +1236,7 @@
     if (cursor < text.length) el.appendChild(document.createTextNode(text.slice(cursor)));
   }
 
-  function buildRow({ id, titleText, previewText, dateText, selected, draggable, onTap, onDelete, titleRanges, previewRanges }) {
+  function buildRow({ id, titleText, previewText, dateText, selected, draggable, onTap, onDelete, onSave, saveLabel, titleRanges, previewRanges }) {
     const li = document.createElement("li");
     li.dataset.id = id;
     li.className =
@@ -1274,6 +1286,12 @@
       onDelete();
     });
 
+    if (onSave) {
+      const saveEl = document.createElement("div");
+      saveEl.className = "memo-save-btn";
+      saveEl.textContent = saveLabel || "保存用へ";
+      li.appendChild(saveEl);
+    }
     li.append(del, content);
     attachSwipe(content, () => {
       if (selectMode) {
@@ -1283,13 +1301,13 @@
       } else {
         onTap();
       }
-    });
+    }, selectMode ? undefined : onSave);
     return li;
   }
 
   // --- 選択モード（一括削除） ---
   function currentListIds() {
-    return (currentTab === "memos" ? filteredMemos() : filteredFiles()).map((x) => x.id);
+    return (currentTab === "files" ? filteredFiles() : filteredMemos()).map((x) => x.id);
   }
 
   function updateSelectBar() {
@@ -1327,10 +1345,10 @@
   async function bulkDelete() {
     const n = checkedIds.size;
     if (!n) return;
-    const kind = currentTab === "memos" ? "メモ" : "ファイル";
+    const kind = currentTab === "files" ? "ファイル" : "メモ";
     if (!confirm(`選択した${kind}${n}件を削除しますか？`)) return;
     bulkDeleteBtn.disabled = true;
-    if (currentTab === "memos") {
+    if (currentTab !== "files") {
       for (const id of checkedIds) deleteMemoNow(id);
       save();
     } else {
@@ -1349,7 +1367,7 @@
     memoList.innerHTML = "";
     openSwipeEl = null;
 
-    if (currentTab === "memos") {
+    if (currentTab !== "files") {
       const rows = memoRows();
       // 検索中(ローカル/AI問わず)と選択モード中は並び替え無効
       const canDrag = !selectMode && !searchQuery.trim() && !aiResult;
@@ -1358,6 +1376,8 @@
           buildRow({
             id: m.id,
             draggable: canDrag,
+            onSave: () => setSaved(m.id, currentTab !== "saved"),
+            saveLabel: currentTab === "saved" ? "メモへ戻す" : "保存用へ",
             chip: dueChip(m.due),
             titleText: m.title.trim() || "無題のメモ",
             titleRanges: m.title.trim() ? titleRanges : [],
@@ -1370,7 +1390,7 @@
           })
         );
       });
-      const total = visibleMemos().length;
+      const total = tabScopedMemos().length;
       countLabel.textContent = (searchQuery.trim() || aiResult) && total > 0
         ? `${rows.length} / ${total} 件`
         : `${total} 件のメモ`;
@@ -1420,7 +1440,7 @@
 
   function renderEditor() {
     // スマホでは編集対象がない時にエディタ領域ごと隠し、一覧を全画面にする
-    const showEditor = currentTab === "memos" && !!getMemo(selectedId);
+    const showEditor = currentTab !== "files" && !!getMemo(selectedId);
     document.body.classList.toggle("no-editor", !showEditor);
 
     if (currentTab === "files") {
@@ -1507,17 +1527,16 @@
     try {
       localStorage.setItem(TAB_KEY, tab);
     } catch (e) {}
-    // ファイルタブはAI検索の対象外。移ったら結果を解除する。
-    if (tab !== "memos") {
-      aiResult = null;
-      aiBar.hidden = true;
-    }
+    // AI検索の結果は前のタブのメモ集合に対するものなので持ち越さない
+    aiResult = null;
+    aiBar.hidden = true;
     updateAiSearchBtn();
     tabMemos.classList.toggle("active", tab === "memos");
+    tabSaved.classList.toggle("active", tab === "saved");
     tabFiles.classList.toggle("active", tab === "files");
-    newBtn.hidden = tab !== "memos";
+    newBtn.hidden = tab === "files";
     uploadBtn.hidden = tab !== "files";
-    sortDueBtn.hidden = tab !== "memos";
+    sortDueBtn.hidden = tab === "files";
     render();
   }
 
@@ -1548,6 +1567,7 @@
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
+    if (currentTab === "saved") memo.saved = true;
     memos.push(memo);
     freshMemoId = memo.id;
     save();
@@ -1597,6 +1617,20 @@
       savedLabel.textContent = "保存しました";
       pushMemo(memo);
     }, 400);
+  }
+
+  // メモ一覧と保存用タブの間の移動(saved=trueで保存用へ)
+  function setSaved(id, saved) {
+    const memo = getMemo(id);
+    if (!memo) return;
+    if (saved) memo.saved = true;
+    else delete memo.saved;
+    delete memo.sample; // 触られたサンプルは通常のメモ扱い
+    memo.updatedAt = Date.now();
+    if (selectedId === id) selectedId = null; // 別タブに移るので選択を外す
+    save();
+    pushMemo(memo);
+    render();
   }
 
   // 他端末にも削除が伝わるよう、消すのではなく削除済みの印を残す
@@ -2469,7 +2503,7 @@
   }
 
   function updateAiSearchBtn() {
-    aiSearchBtn.hidden = !(currentTab === "memos" && !!getAnthropicKey() && !!searchQuery.trim());
+    aiSearchBtn.hidden = !(currentTab !== "files" && !!getAnthropicKey() && !!searchQuery.trim());
   }
 
   function updateAnthropicKeyState() {
@@ -2740,6 +2774,7 @@
   });
 
   tabMemos.addEventListener("click", () => switchTab("memos"));
+  tabSaved.addEventListener("click", () => switchTab("saved"));
   tabFiles.addEventListener("click", () => switchTab("files"));
   selectBtn.addEventListener("click", toggleSelectMode);
   selectAllBtn.addEventListener("click", toggleSelectAll);

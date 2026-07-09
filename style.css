@@ -204,7 +204,8 @@ body {
 .memo-item.drag-source .drag-handle {
   opacity: 0.3;
 }
-.memo-item.drag-source .memo-delete-btn {
+.memo-item.drag-source .memo-delete-btn,
+.memo-item.drag-source .memo-save-btn {
   display: none;
 }
 
@@ -229,7 +230,8 @@ body {
 .memo-item.drag-ghost .memo-swipe-content {
   background: var(--sidebar-bg);
 }
-.memo-item.drag-ghost .memo-delete-btn {
+.memo-item.drag-ghost .memo-delete-btn,
+.memo-item.drag-ghost .memo-save-btn {
   display: none;
 }
 
@@ -349,6 +351,21 @@ body {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+}
+/* 右スワイプで現れる「保存用へ」の背景(開き切るとそのまま移動する) */
+.memo-save-btn {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 96px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1a7f37;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
 }
 .memo-item .memo-title {
   font-size: 14px;
