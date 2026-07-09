@@ -63,6 +63,10 @@
           <span id="dueInfo" class="due-info"></span>
         </div>
         <textarea id="bodyInput" class="body-input" placeholder="ここに本文を入力…"></textarea>
+        <div id="translationPane" class="translation-pane" hidden>
+          <div class="translation-label">英訳</div>
+          <div id="translationText" class="translation-text"></div>
+        </div>
         <div id="proofBar" class="proof-bar" hidden>
           <span id="proofBarText"></span>
           <button id="proofBarUndo" class="proof-bar-undo" hidden>元に戻す</button>
@@ -123,7 +127,7 @@
         <button id="anthropicKeySaveBtn" class="modal-btn">キーを保存</button>
         <label class="modal-check">
           <input type="checkbox" id="autoProofreadCheck">
-          本文の自動整形（入力が止まったら誤字を直し、タイトルが空なら要約を入れる。そのたびに課金されます）
+          本文の自動整形（入力が止まったら誤字を直し、タイトルが空なら要約を入れ、英訳を下に表示する。そのたびに課金されます）
         </label>
         <p class="modal-desc anthropic-key-note">
           キーはこのブラウザにだけ保存されます。要約の生成にはAnthropicの従量課金（1ファイルにつき数円程度）がかかります。

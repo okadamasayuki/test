@@ -60,6 +60,8 @@
   const dueInfo = document.getElementById("dueInfo");
   const bodyInput = document.getElementById("bodyInput");
   const copyBodyBtn = document.getElementById("copyBodyBtn");
+  const translationPane = document.getElementById("translationPane");
+  const translationText = document.getElementById("translationText");
   const proofBar = document.getElementById("proofBar");
   const proofBarText = document.getElementById("proofBarText");
   const proofBarUndo = document.getElementById("proofBarUndo");
@@ -351,7 +353,10 @@
     "2. changes: 直した箇所を before/after の組で列挙する。直していなければ空配列。" +
     "\n\n" +
     "3. title: 本文の内容を表す20文字以内の短いタイトルを1つ考える。" +
-    "本文が意味をなさない場合は空文字にする。";
+    "本文が意味をなさない場合は空文字にする。" +
+    "\n\n" +
+    "4. translation: correctedの本文全体を自然な英語に翻訳する。" +
+    "改行・箇条書きの構造は本文に合わせる。";
 
   const PROOFREAD_SCHEMA = {
     type: "object",
@@ -367,8 +372,9 @@
         },
       },
       title: { type: "string" },
+      translation: { type: "string" },
     },
-    required: ["corrected", "changes", "title"],
+    required: ["corrected", "changes", "title", "translation"],
     additionalProperties: false,
   };
 
@@ -465,7 +471,12 @@
     if (typeof parsed.corrected !== "string") {
       throw new Error("整形の結果を解釈できませんでした。");
     }
-    return { corrected: parsed.corrected, changes: parsed.changes || [], title: parsed.title || "" };
+    return {
+      corrected: parsed.corrected,
+      changes: parsed.changes || [],
+      title: parsed.title || "",
+      translation: parsed.translation || "",
+    };
   }
 
   let proofreadMemory = { ...EMPTY_PROOFREAD_MEMORY };
@@ -529,6 +540,10 @@
 
       showProofBar(changesLabel(result.changes.length), proofreadUndoBody !== null, false);
       scheduleProofBarHide();
+      if (result.translation.trim()) {
+        translationText.textContent = result.translation.trim();
+        translationPane.hidden = false;
+      }
     } catch (e) {
       showProofBar(String(e?.message || e), false, true);
       scheduleProofBarHide();
@@ -543,6 +558,8 @@
     proofreadMemory = { ...EMPTY_PROOFREAD_MEMORY };
     proofreadUndoBody = null;
     proofBar.hidden = true;
+    translationPane.hidden = true;
+    translationText.textContent = "";
   }
 
   // 入力が止まってから走らせる

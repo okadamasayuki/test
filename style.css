@@ -606,6 +606,25 @@ body {
   padding: 4px 8px;
 }
 
+/* --- 英訳ペイン(整形と同じ応答で返る。本文と半々に分ける) --- */
+.translation-pane {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 20px;
+  border-top: 1px solid var(--border);
+}
+.translation-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.translation-text {
+  font-size: 14px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
 /* --- 本文の自動整形バー --- */
 .proof-bar {
   display: flex;
