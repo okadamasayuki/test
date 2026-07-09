@@ -1429,9 +1429,13 @@
       num.textContent = String(cell.d);
       const dots = document.createElement("span");
       dots.className = "cal-dots";
+      // ドットの色は「その日が期日だったら」の緊急度(チップと同じ4段階)
+      const dotCls = dueCount
+        ? (dueChip(endOfDay(new Date(cell.y, cell.m, cell.d))) || { cls: "later" }).cls
+        : "";
       for (let i = 0; i < Math.min(dueCount, 3); i++) {
         const dot = document.createElement("span");
-        dot.className = "cal-dot";
+        dot.className = "cal-dot " + dotCls;
         dots.appendChild(dot);
       }
       el.append(num, dots);
@@ -1444,6 +1448,17 @@
       grid.appendChild(el);
     }
     li.appendChild(grid);
+
+    const legend = document.createElement("div");
+    legend.className = "cal-legend";
+    for (const [cls, label] of [["overdue", "期限切れ"], ["today", "本日"], ["soon", "今週"], ["later", "来週〜"]]) {
+      const item = document.createElement("span");
+      const dot = document.createElement("span");
+      dot.className = "cal-dot " + cls;
+      item.append(dot, document.createTextNode(label));
+      legend.appendChild(item);
+    }
+    li.appendChild(legend);
 
     // 選んだ日のtodo一覧
     if (calSelectedKey) {
