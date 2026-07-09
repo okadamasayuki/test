@@ -597,6 +597,42 @@ body {
   padding: 4px 8px;
 }
 
+/* --- xlsxプレビュー --- */
+.preview-body .xlsx-content {
+  padding: 16px 20px 24px;
+  overflow: auto;
+}
+.preview-body .xlsx-sheet-name {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+.preview-body .xlsx-content table {
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.preview-body .xlsx-content td,
+.preview-body .xlsx-content th {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+  white-space: nowrap;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.preview-body .xlsx-content th {
+  background: var(--bg);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+}
+/* 数値は右寄せ。文字列と揃えると桁が読みにくい。 */
+.preview-body .xlsx-content td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 /* --- Editor --- */
 .editor {
   flex: 1;

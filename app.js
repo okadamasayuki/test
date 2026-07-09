@@ -1038,6 +1038,13 @@
     );
   }
 
+  function isXlsx(meta) {
+    return (
+      meta.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+      (meta.name || "").toLowerCase().endsWith(".xlsx")
+    );
+  }
+
   function previewable(meta) {
     const t = meta.type || "";
     return (
@@ -1045,8 +1052,257 @@
       t === "application/pdf" ||
       t.startsWith("text/") ||
       t === "application/json" ||
-      isDocx(meta)
+      isDocx(meta) ||
+      isXlsx(meta)
     );
+  }
+
+  // --- xlsx の読み出し（iOSアプリの src/lib/xlsxRead.ts と同じロジック） ---
+  //
+  // 文字列は sharedStrings.xml に集約されて番号で参照される(t="s")ことも、
+  // セルに直接埋め込まれる(inlineStr)こともある。Excelは前者、openpyxlは後者。
+  // 数式は結果のキャッシュ<v>を持つが、ライブラリが書くと空になる。
+  // 日付はシリアル値で、styles.xml の numFmtId を見ないと日付だと分からない。
+
+  const XML_ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+
+  function decodeXmlEntities(s) {
+    return s.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (whole, body) => {
+      if (body[0] === "#") {
+        const code =
+          body[1] === "x" || body[1] === "X"
+            ? parseInt(body.slice(2), 16)
+            : parseInt(body.slice(1), 10);
+        return Number.isFinite(code) ? String.fromCodePoint(code) : whole;
+      }
+      const hit = XML_ENTITIES[body];
+      return hit === undefined ? whole : hit;
+    });
+  }
+
+  // 中の <t> をすべて連結する。自己閉じを先に試さないと後続を飲み込む。
+  function collectText(xml) {
+    const re = /<t\b[^>]*\/>|<t\b[^>]*>([\s\S]*?)<\/t>/g;
+    let text = "";
+    let m;
+    while ((m = re.exec(xml))) text += decodeXmlEntities(m[1] ?? "");
+    return text;
+  }
+
+  function columnIndex(ref) {
+    const letters = /^([A-Z]+)/.exec(ref);
+    if (!letters) return 0;
+    let n = 0;
+    for (const ch of letters[1]) n = n * 26 + (ch.charCodeAt(0) - 64);
+    return n - 1;
+  }
+
+  function parseSharedStrings(xml) {
+    const out = [];
+    const re = /<si\b[^>]*\/>|<si\b[^>]*>([\s\S]*?)<\/si>/g;
+    let m;
+    while ((m = re.exec(xml))) out.push(collectText(m[1] ?? ""));
+    return out;
+  }
+
+  const BUILTIN_DATE_FMTS = new Set([14, 15, 16, 17, 18, 19, 20, 21, 22, 45, 46, 47]);
+
+  function parseStyles(xml) {
+    const custom = new Map();
+    const fmtRe = /<numFmt\b[^>]*\snumFmtId="(\d+)"[^>]*\sformatCode="([^"]*)"/g;
+    let m;
+    while ((m = fmtRe.exec(xml))) custom.set(parseInt(m[1], 10), decodeXmlEntities(m[2]));
+
+    const cellXfs = /<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/.exec(xml)?.[1] ?? "";
+    const fmtIds = [];
+    const xfRe = /<xf\b([^>]*)\/>|<xf\b([^>]*)>[\s\S]*?<\/xf>/g;
+    let x;
+    while ((x = xfRe.exec(cellXfs))) {
+      const attrs = x[1] ?? x[2] ?? "";
+      fmtIds.push(parseInt(/\snumFmtId="(\d+)"/.exec(attrs)?.[1] ?? "0", 10));
+    }
+
+    // 書式コード中の [..] や "..." を除いた上で年月日時分秒の記号を探す
+    const dateLike = (code) => /[ymdhs]/i.test(code.replace(/\[[^\]]*\]/g, "").replace(/"[^"]*"/g, ""));
+
+    return {
+      isDate(styleIndex) {
+        const id = fmtIds[styleIndex];
+        if (id === undefined) return false;
+        if (BUILTIN_DATE_FMTS.has(id)) return true;
+        const code = custom.get(id);
+        return code !== undefined && dateLike(code);
+      },
+    };
+  }
+
+  // Excelはシリアル60を実在しない1900/02/29として数えるため、60以前は1日ずれる
+  function serialToDateText(serial) {
+    const adjusted = serial < 61 ? serial + 1 : serial;
+    const ms = Math.round((adjusted - 25569) * 86400000);
+    if (!Number.isFinite(ms)) return String(serial);
+    const d = new Date(ms);
+    const p2 = (n) => String(n).padStart(2, "0");
+    const date = `${d.getUTCFullYear()}/${p2(d.getUTCMonth() + 1)}/${p2(d.getUTCDate())}`;
+    if (serial - Math.floor(serial) === 0) return date;
+    const time = `${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}`;
+    return serial < 1 ? time : `${date} ${time}`;
+  }
+
+  const EMPTY_CELL = { text: "", numeric: false };
+
+  function cellValue(attrs, inner, shared, styles) {
+    const type = /\st="([^"]*)"/.exec(attrs)?.[1] ?? "n";
+    if (type === "inlineStr") return { text: collectText(inner), numeric: false };
+
+    const raw = /<v\b[^>]*>([\s\S]*?)<\/v>/.exec(inner)?.[1];
+    if (raw === undefined) {
+      const formula = /<f\b[^>]*>([\s\S]*?)<\/f>/.exec(inner)?.[1];
+      // 結果が無いなら数式そのものを見せる。空欄よりは伝わる。
+      if (formula) return { text: "=" + decodeXmlEntities(formula), numeric: false };
+      return EMPTY_CELL;
+    }
+    const v = decodeXmlEntities(raw);
+
+    if (type === "s") return { text: shared[parseInt(v, 10)] ?? "", numeric: false };
+    if (type === "b") return { text: v === "1" ? "TRUE" : "FALSE", numeric: false };
+    if (type === "str" || type === "e") return { text: v, numeric: false };
+
+    const styleIndex = parseInt(/\ss="(\d+)"/.exec(attrs)?.[1] ?? "-1", 10);
+    const n = Number(v);
+    if (styleIndex >= 0 && Number.isFinite(n) && styles.isDate(styleIndex)) {
+      return { text: serialToDateText(n), numeric: false };
+    }
+    return { text: v, numeric: true };
+  }
+
+  function trimSheet(rows) {
+    const isBlank = (c) => !c || c.text === "";
+    while (rows.length && rows[rows.length - 1].every(isBlank)) rows.pop();
+    let width = 0;
+    for (const r of rows) {
+      for (let i = r.length - 1; i >= 0; i--) {
+        if (!isBlank(r[i])) {
+          width = Math.max(width, i + 1);
+          break;
+        }
+      }
+    }
+    return rows.map((r) => {
+      const row = r.slice(0, width);
+      while (row.length < width) row.push(EMPTY_CELL);
+      return row;
+    });
+  }
+
+  function parseSheetXml(xml, shared, styles) {
+    const rows = [];
+    // 自己閉じを先に試す。逆にすると <row r="3"/> が後続を飲み込む。
+    const rowRe = /<row\b([^>]*)\/>|<row\b([^>]*)>([\s\S]*?)<\/row>/g;
+    let rm;
+    while ((rm = rowRe.exec(xml))) {
+      const attrs = rm[1] ?? rm[2] ?? "";
+      const inner = rm[3] ?? "";
+      const rowNum = parseInt(/\sr="(\d+)"/.exec(attrs)?.[1] ?? "0", 10);
+      const index = rowNum > 0 ? rowNum - 1 : rows.length;
+
+      const cells = [];
+      // 同上。<c r="A1"/> が次のセルを飲み込まないように。
+      const cellRe = /<c\b([^>]*)\/>|<c\b([^>]*)>([\s\S]*?)<\/c>/g;
+      let cm;
+      let auto = 0;
+      while ((cm = cellRe.exec(inner))) {
+        const selfClosing = cm[1] !== undefined;
+        const cAttrs = cm[1] ?? cm[2] ?? "";
+        const cInner = cm[3] ?? "";
+        const ref = /\sr="([A-Z]+\d+)"/.exec(cAttrs)?.[1];
+        const col = ref ? columnIndex(ref) : auto;
+        auto = col + 1;
+        while (cells.length < col) cells.push(EMPTY_CELL);
+        cells[col] = selfClosing ? EMPTY_CELL : cellValue(cAttrs, cInner, shared, styles);
+      }
+      while (rows.length < index) rows.push([]);
+      rows[index] = cells;
+    }
+    return trimSheet(rows);
+  }
+
+  function firstSheetPath(workbookXml, relsXml) {
+    const rid = /<sheet\b[^>]*\sr:id="([^"]+)"/.exec(workbookXml)?.[1];
+    if (!rid) return null;
+    const re = new RegExp(`<Relationship\\b[^>]*\\sId="${rid}"[^>]*\\sTarget="([^"]+)"`);
+    const target = re.exec(relsXml)?.[1];
+    if (!target) return null;
+    return "xl/" + target.replace(/^\/?xl\//, "").replace(/^\.\//, "");
+  }
+
+  function firstSheetName(workbookXml) {
+    const name = /<sheet\b[^>]*\sname="([^"]*)"/.exec(workbookXml)?.[1];
+    return name ? decodeXmlEntities(name) : "Sheet1";
+  }
+
+  function readXlsx(bytes) {
+    const zip = fflate.unzipSync(bytes);
+    const read = (p) => (zip[p] ? fflate.strFromU8(zip[p]) : null);
+
+    const workbook = read("xl/workbook.xml");
+    if (!workbook) throw new Error("xlsxのブック(xl/workbook.xml)が見つかりません");
+
+    const rels = read("xl/_rels/workbook.xml.rels") ?? "";
+    const path = firstSheetPath(workbook, rels) ?? "xl/worksheets/sheet1.xml";
+    const sheet = read(path) ?? read("xl/worksheets/sheet1.xml");
+    if (!sheet) throw new Error("xlsxのシートが見つかりません");
+
+    const shared = parseSharedStrings(read("xl/sharedStrings.xml") ?? "");
+    const styles = parseStyles(read("xl/styles.xml") ?? "");
+    return { name: firstSheetName(workbook), rows: parseSheetXml(sheet, shared, styles) };
+  }
+
+  // fflate（ZIP展開）は必要になった時に一度だけ読み込む
+  let fflateLoading = null;
+  function loadFflate() {
+    if (window.fflate) return Promise.resolve(window.fflate);
+    if (!fflateLoading) {
+      fflateLoading = new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = "vendor/fflate.umd.js";
+        s.onload = () => resolve(window.fflate);
+        s.onerror = () => reject(new Error("プレビュー用ライブラリの読み込みに失敗しました"));
+        document.head.appendChild(s);
+      });
+    }
+    return fflateLoading;
+  }
+
+  function renderXlsxTable(sheet) {
+    const wrap = document.createElement("div");
+    wrap.className = "xlsx-content";
+
+    const caption = document.createElement("div");
+    caption.className = "xlsx-sheet-name";
+    caption.textContent = `シート: ${sheet.name}`;
+    wrap.appendChild(caption);
+
+    if (!sheet.rows.some((r) => r.some((c) => c.text !== ""))) {
+      const p = document.createElement("p");
+      p.textContent = "このシートには表示できるセルがありません。";
+      wrap.appendChild(p);
+      return wrap;
+    }
+
+    const table = document.createElement("table");
+    sheet.rows.forEach((row, r) => {
+      const tr = document.createElement("tr");
+      row.forEach((cell) => {
+        const td = document.createElement(r === 0 ? "th" : "td");
+        td.textContent = cell.text;
+        if (cell.numeric) td.classList.add("num");
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+    wrap.appendChild(table);
+    return wrap;
   }
 
   // mammoth.js（docx→HTML変換）は必要になった時に一度だけ読み込む
@@ -1095,6 +1351,10 @@
         div.className = "docx-content";
         div.innerHTML = result.value;
         previewBody.appendChild(div);
+      } else if (isXlsx(meta)) {
+        await loadFflate();
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        previewBody.appendChild(renderXlsxTable(readXlsx(bytes)));
       } else {
         const pre = document.createElement("pre");
         pre.textContent = await blob.text();
