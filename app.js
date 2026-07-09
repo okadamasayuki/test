@@ -64,6 +64,7 @@
   const dueInfo = document.getElementById("dueInfo");
   const bodyInput = document.getElementById("bodyInput");
   const copyBodyBtn = document.getElementById("copyBodyBtn");
+  const linkBar = document.getElementById("linkBar");
   const translationPane = document.getElementById("translationPane");
   const translationText = document.getElementById("translationText");
   const proofBar = document.getElementById("proofBar");
@@ -949,6 +950,51 @@
     return [starts[hit], ends[hit + needle.length - 1]];
   }
 
+  // --- 本文のURL検出(iOSアプリの src/lib/links.ts と同じロジック) ---
+  const URL_RE = /https?:\/\/[A-Za-z0-9\-._~:\/?#[\]@!$&'()*+,;=%]+/g;
+  const TRAIL_RE = /[)\]'">,.;:!?]+$/;
+  const MAX_LINKS = 20;
+
+  function cleanUrl(raw) {
+    const cleaned = raw.replace(TRAIL_RE, "");
+    return cleaned.length >= "https://a".length ? cleaned : raw;
+  }
+
+  function extractUrls(text) {
+    const seen = new Set();
+    const urls = [];
+    for (const m of text.matchAll(URL_RE)) {
+      const url = cleanUrl(m[0]);
+      if (seen.has(url)) continue;
+      seen.add(url);
+      urls.push(url);
+      if (urls.length >= MAX_LINKS) break;
+    }
+    return urls;
+  }
+
+  function linkLabel(url, max = 40) {
+    const short = url.replace(/^https?:\/\//, "");
+    return short.length <= max ? short : short.slice(0, max) + "…";
+  }
+
+  // 本文の下のリンクチップを最新にする
+  function renderLinks() {
+    linkBar.innerHTML = "";
+    const urls = extractUrls(bodyInput.value || "");
+    linkBar.hidden = urls.length === 0;
+    for (const url of urls) {
+      const a = document.createElement("a");
+      a.className = "link-chip";
+      a.href = url;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.textContent = "🔗 " + linkLabel(url);
+      a.title = url;
+      linkBar.appendChild(a);
+    }
+  }
+
   // --- スケジュールタブのカレンダー(iOSアプリの src/lib/calendar.ts と同じロジック) ---
   const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
 
@@ -1673,6 +1719,7 @@
     // 他端末からの反映時に入力中のカーソルを壊さないよう、値が違う時だけ入れ替える
     if (titleInput.value !== memo.title) titleInput.value = memo.title;
     if (bodyInput.value !== memo.body) bodyInput.value = memo.body;
+    renderLinks();
     renderTranslation(memo);
     savedLabel.textContent = "最終更新: " + formatDate(memo.updatedAt);
 
@@ -2276,6 +2323,18 @@
     "書式やファイル形式の説明ではなく、書かれている中身の要点（金額・日付・決定事項など）を伝えてください。" +
     "前置きは不要で、要約本文だけを返してください。";
   const SUMMARY_MAX_TEXT_CHARS = 50000;
+
+  // PDFは1ページごとに「テキスト+ページ画像」として課金されるため、
+  // 大きいものを送ると高額になる。上限を超えたら要約自体を断る。
+  const MAX_PDF_BYTES = 5 * 1024 * 1024; // 5MB
+
+  function summarySizeError(meta) {
+    if (previewKind(meta) === "pdf" && meta.size > MAX_PDF_BYTES) {
+      const mb = (meta.size / 1024 / 1024).toFixed(1);
+      return `このPDFは大きすぎるため要約できません（${mb}MB、上限5MB）。大きいPDFは課金が高額になるため制限しています。`;
+    }
+    return null;
+  }
   const SUMMARY_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
 
   function getAnthropicKey() {
@@ -2353,6 +2412,9 @@
   async function requestSummary(meta, base64) {
     const apiKey = getAnthropicKey();
     if (!apiKey) throw new Error("APIキーが設定されていません（⚙から設定）");
+    // 大きすぎるPDFはAPIを呼ばない(課金保護)
+    const sizeErr = summarySizeError(meta);
+    if (sizeErr) throw new Error(sizeErr);
     const content = await buildSummaryContent(meta, base64);
 
     let res;
@@ -2919,6 +2981,7 @@
   bodyInput.addEventListener("input", () => {
     updateSelected();
     scheduleProofread();
+    renderLinks();
   });
   proofBarUndo.addEventListener("click", undoProofread);
   copyBodyBtn.addEventListener("click", async () => {
