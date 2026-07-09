@@ -15,7 +15,8 @@
   const TAB_KEY = "memo-app.tab.v1";
   // リロードしても選択中のタブを維持する
   const savedTab = localStorage.getItem(TAB_KEY);
-  let currentTab = savedTab === "files" || savedTab === "saved" ? savedTab : "memos";
+  let currentTab =
+    savedTab === "files" || savedTab === "saved" || savedTab === "schedule" ? savedTab : "memos";
   let selectMode = false; // 一括削除の選択モード
   const checkedIds = new Set();
 
@@ -49,6 +50,7 @@
   const bulkDeleteBtn = document.getElementById("bulkDeleteBtn");
   const uploadBtn = document.getElementById("uploadBtn");
   const fileInput = document.getElementById("fileInput");
+  const tabSchedule = document.getElementById("tabSchedule");
   const tabMemos = document.getElementById("tabMemos");
   const tabSaved = document.getElementById("tabSaved");
   const tabFiles = document.getElementById("tabFiles");
@@ -947,6 +949,65 @@
     return [starts[hit], ends[hit + needle.length - 1]];
   }
 
+  // --- スケジュールタブのカレンダー(iOSアプリの src/lib/calendar.ts と同じロジック) ---
+  const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
+
+  function dayKey(y, m, d) {
+    return `${y}-${m + 1}-${d}`;
+  }
+
+  function dayKeyFromTs(ts) {
+    const dt = new Date(ts);
+    return dayKey(dt.getFullYear(), dt.getMonth(), dt.getDate());
+  }
+
+  function monthLabel(y, m) {
+    return `${y}年 ${m + 1}月`;
+  }
+
+  function addMonths(y, m, delta) {
+    const total = y * 12 + m + delta;
+    return { y: Math.floor(total / 12), m: ((total % 12) + 12) % 12 };
+  }
+
+  // 日曜始まりの6週分(42マス)。先頭は「1日を含む週の日曜」。
+  function monthGrid(y, m) {
+    const first = new Date(y, m, 1);
+    const start = new Date(y, m, 1 - first.getDay());
+    const cells = [];
+    for (let i = 0; i < 42; i++) {
+      const dt = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+      cells.push({
+        y: dt.getFullYear(),
+        m: dt.getMonth(),
+        d: dt.getDate(),
+        inMonth: dt.getMonth() === m && dt.getFullYear() === y,
+        key: dayKey(dt.getFullYear(), dt.getMonth(), dt.getDate()),
+      });
+    }
+    return cells;
+  }
+
+  function dueCountByDay(list) {
+    const map = new Map();
+    for (const m of list) {
+      if (typeof m.due !== "number") continue;
+      const key = dayKeyFromTs(m.due);
+      map.set(key, (map.get(key) || 0) + 1);
+    }
+    return map;
+  }
+
+  const calNow = new Date();
+  let calY = calNow.getFullYear();
+  let calM = calNow.getMonth();
+  let calSelectedKey = null; // クリックした日(その日のtodo一覧を下に出す)
+
+  // 期日ドットと日別一覧はtodo(保存用でない)の生きているメモが対象
+  function todoWithDue() {
+    return sortedMemos().filter((m) => !m.saved && typeof m.due === "number");
+  }
+
   // いま開いているメモ系タブ(メモ/保存用)に属するメモだけを返す
   function tabScopedMemos() {
     return sortedMemos().filter((m) => (currentTab === "saved" ? !!m.saved : !m.saved));
@@ -1305,6 +1366,132 @@
     return li;
   }
 
+  // --- スケジュールタブの描画 ---
+  function renderCalendar() {
+    const li = document.createElement("li");
+    li.className = "cal-container";
+
+    const header = document.createElement("div");
+    header.className = "cal-header";
+    const title = document.createElement("span");
+    title.className = "cal-title";
+    title.textContent = monthLabel(calY, calM);
+    title.title = "クリックで今月に戻る";
+    title.addEventListener("click", () => {
+      const now = new Date();
+      calY = now.getFullYear();
+      calM = now.getMonth();
+      renderList();
+    });
+    const nav = document.createElement("div");
+    nav.className = "cal-nav";
+    for (const [label, delta] of [["‹", -1], ["›", 1]]) {
+      const btn = document.createElement("button");
+      btn.className = "cal-nav-btn";
+      btn.textContent = label;
+      btn.addEventListener("click", () => {
+        const next = addMonths(calY, calM, delta);
+        calY = next.y;
+        calM = next.m;
+        renderList();
+      });
+      nav.appendChild(btn);
+    }
+    header.append(title, nav);
+    li.appendChild(header);
+
+    const week = document.createElement("div");
+    week.className = "cal-week";
+    for (const w of WEEKDAYS) {
+      const el = document.createElement("span");
+      el.textContent = w;
+      week.appendChild(el);
+    }
+    li.appendChild(week);
+
+    const dueMap = dueCountByDay(todoWithDue());
+    const now = new Date();
+    const todayKey = dayKey(now.getFullYear(), now.getMonth(), now.getDate());
+    const grid = document.createElement("div");
+    grid.className = "cal-grid";
+    let monthDue = 0;
+    for (const cell of monthGrid(calY, calM)) {
+      const dueCount = dueMap.get(cell.key) || 0;
+      if (cell.inMonth) monthDue += dueCount;
+      const el = document.createElement("button");
+      el.className =
+        "cal-cell" +
+        (cell.inMonth ? "" : " out") +
+        (cell.inMonth && cell.key === todayKey ? " today" : "") +
+        (cell.key === calSelectedKey ? " selected" : "");
+      const num = document.createElement("span");
+      num.className = "cal-day";
+      num.textContent = String(cell.d);
+      const dots = document.createElement("span");
+      dots.className = "cal-dots";
+      for (let i = 0; i < Math.min(dueCount, 3); i++) {
+        const dot = document.createElement("span");
+        dot.className = "cal-dot";
+        dots.appendChild(dot);
+      }
+      el.append(num, dots);
+      // クリック(スマホはタップ)でその日のtodo一覧を下に出す
+      el.addEventListener("click", () => {
+        calSelectedKey = calSelectedKey === cell.key ? null : cell.key;
+        calSelectedLabel = `${cell.m + 1}月${cell.d}日`;
+        renderList();
+      });
+      grid.appendChild(el);
+    }
+    li.appendChild(grid);
+
+    // 選んだ日のtodo一覧
+    if (calSelectedKey) {
+      const dayList = document.createElement("div");
+      dayList.className = "cal-day-list";
+      const head = document.createElement("div");
+      head.className = "cal-day-list-title";
+      head.textContent = `${calSelectedLabel}が期日のtodo`;
+      dayList.appendChild(head);
+      const items = todoWithDue()
+        .filter((m) => dayKeyFromTs(m.due) === calSelectedKey)
+        .sort((a, b) => a.due - b.due);
+      if (!items.length) {
+        const none = document.createElement("div");
+        none.className = "cal-day-empty";
+        none.textContent = "この日が期日のtodoはありません。";
+        dayList.appendChild(none);
+      }
+      for (const m of items) {
+        const row = document.createElement("button");
+        row.className = "cal-day-item";
+        const t = document.createElement("div");
+        t.className = "cal-day-item-title";
+        t.textContent = m.title.trim() || "無題のメモ";
+        row.appendChild(t);
+        const firstLine = m.body.trim().split("\n")[0];
+        if (firstLine) {
+          const p = document.createElement("div");
+          p.className = "cal-day-item-preview";
+          p.textContent = firstLine;
+          row.appendChild(p);
+        }
+        row.addEventListener("click", () => selectMemo(m.id));
+        dayList.appendChild(row);
+      }
+      li.appendChild(dayList);
+    } else {
+      const hint = document.createElement("div");
+      hint.className = "cal-hint";
+      hint.textContent = "● がその日が期日のtodo。日付を押すと一覧が出ます。";
+      li.appendChild(hint);
+    }
+
+    memoList.appendChild(li);
+    countLabel.textContent = `今月の期日: ${monthDue}件`;
+  }
+  let calSelectedLabel = "";
+
   // --- 選択モード（一括削除） ---
   function currentListIds() {
     return (currentTab === "files" ? filteredFiles() : filteredMemos()).map((x) => x.id);
@@ -1367,6 +1554,11 @@
     memoList.innerHTML = "";
     openSwipeEl = null;
 
+    if (currentTab === "schedule") {
+      renderCalendar();
+      return;
+    }
+
     if (currentTab !== "files") {
       const rows = memoRows();
       // 検索中(ローカル/AI問わず)と選択モード中は並び替え無効
@@ -1377,7 +1569,7 @@
             id: m.id,
             draggable: canDrag,
             onSave: () => setSaved(m.id, currentTab !== "saved"),
-            saveLabel: currentTab === "saved" ? "メモへ戻す" : "保存用へ",
+            saveLabel: currentTab === "saved" ? "todoへ戻す" : "保存用へ",
             chip: dueChip(m.due),
             titleText: m.title.trim() || "無題のメモ",
             titleRanges: m.title.trim() ? titleRanges : [],
@@ -1455,7 +1647,10 @@
       selectedId = null;
       editorPane.hidden = true;
       emptyState.hidden = false;
-      emptyStateText.innerHTML = "メモを選択するか、<br>「+ 新規」で作成してください。";
+      emptyStateText.innerHTML =
+        currentTab === "schedule"
+          ? "カレンダーの日付を押すと、<br>その日が期日のtodoが見えます。"
+          : "メモを選択するか、<br>「+ 新規」で作成してください。";
       return;
     }
     emptyState.hidden = true;
@@ -1531,12 +1726,16 @@
     aiResult = null;
     aiBar.hidden = true;
     updateAiSearchBtn();
+    tabSchedule.classList.toggle("active", tab === "schedule");
     tabMemos.classList.toggle("active", tab === "memos");
     tabSaved.classList.toggle("active", tab === "saved");
     tabFiles.classList.toggle("active", tab === "files");
     newBtn.hidden = tab === "files";
     uploadBtn.hidden = tab !== "files";
-    sortDueBtn.hidden = tab === "files";
+    sortDueBtn.hidden = tab === "files" || tab === "schedule";
+    // カレンダーに検索と選択モードは無い
+    searchInput.parentElement.hidden = tab === "schedule";
+    selectBtn.hidden = tab === "schedule";
     render();
   }
 
@@ -1560,8 +1759,8 @@
 
   function createMemo() {
     discardFreshIfEmpty(null);
-    // 新規メモは常にメモ一覧に作る(保存用タブで押した場合はタブも移す)
-    if (currentTab === "saved") switchTab("memos");
+    // 新規メモは常にtodo一覧に作る(他のタブで押した場合はタブも移す)
+    if (currentTab !== "memos") switchTab("memos");
     const memo = {
       id: uid(),
       title: "",
@@ -2774,6 +2973,7 @@
     render();
   });
 
+  tabSchedule.addEventListener("click", () => switchTab("schedule"));
   tabMemos.addEventListener("click", () => switchTab("memos"));
   tabSaved.addEventListener("click", () => switchTab("saved"));
   tabFiles.addEventListener("click", () => switchTab("files"));
