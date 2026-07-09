@@ -483,6 +483,7 @@
   let proofreadTimer = null;
   let proofreadBusy = false;
   let proofreadUndoBody = null;
+  let proofreadUndoTranslation = null;
   let proofreadUndoTimer = null;
 
   function showProofBar(text, canUndo, isError) {
@@ -495,6 +496,7 @@
   function hideProofBar() {
     proofBar.hidden = true;
     proofreadUndoBody = null;
+    proofreadUndoTranslation = null;
   }
 
   function scheduleProofBarHide() {
@@ -507,8 +509,21 @@
     // 戻した本文でまた整形が走らないよう、送信済みとして記録しておく
     proofreadMemory = { lastSent: proofreadUndoBody, lastCorrected: proofreadUndoBody };
     bodyInput.value = proofreadUndoBody;
+    // 英訳も整形前のものに戻す
+    const memo = getMemo(selectedId);
+    if (memo) {
+      memo.translation = proofreadUndoTranslation || "";
+      renderTranslation(memo);
+    }
     updateSelected();
     hideProofBar();
+  }
+
+  // 英訳ペインの表示をメモの保存値に合わせる
+  function renderTranslation(memo) {
+    const tr = ((memo && memo.translation) || "").trim();
+    translationText.textContent = tr;
+    translationPane.hidden = !tr;
   }
 
   async function runProofread() {
@@ -529,6 +544,7 @@
       if (bodyChanged(sent, result.corrected)) {
         bodyInput.value = result.corrected;
         proofreadUndoBody = sent;
+        proofreadUndoTranslation = memo.translation || "";
         applied = true;
       }
       const newTitle = pickTitle(titleInput.value, result.title);
@@ -536,14 +552,17 @@
         titleInput.value = newTitle;
         applied = true;
       }
+      // 英訳はメモに保存する(端末をまたいで同期され、iOS版の長押しにも出る)
+      const newTranslation = result.translation.trim();
+      if (newTranslation && newTranslation !== (memo.translation || "")) {
+        memo.translation = newTranslation;
+        applied = true;
+      }
+      renderTranslation(memo);
       if (applied) updateSelected();
 
       showProofBar(changesLabel(result.changes.length), proofreadUndoBody !== null, false);
       scheduleProofBarHide();
-      if (result.translation.trim()) {
-        translationText.textContent = result.translation.trim();
-        translationPane.hidden = false;
-      }
     } catch (e) {
       showProofBar(String(e?.message || e), false, true);
       scheduleProofBarHide();
@@ -557,6 +576,7 @@
     clearTimeout(proofreadUndoTimer);
     proofreadMemory = { ...EMPTY_PROOFREAD_MEMORY };
     proofreadUndoBody = null;
+    proofreadUndoTranslation = null;
     proofBar.hidden = true;
     translationPane.hidden = true;
     translationText.textContent = "";
@@ -1423,6 +1443,7 @@
     // 他端末からの反映時に入力中のカーソルを壊さないよう、値が違う時だけ入れ替える
     if (titleInput.value !== memo.title) titleInput.value = memo.title;
     if (bodyInput.value !== memo.body) bodyInput.value = memo.body;
+    renderTranslation(memo);
     savedLabel.textContent = "最終更新: " + formatDate(memo.updatedAt);
 
     // 期日セレクタの表示を現在の値に合わせる
