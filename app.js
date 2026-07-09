@@ -375,10 +375,11 @@
     additionalProperties: false,
   };
 
-  // タイトルは空のときだけ入れる。自分で付けたタイトルを消さない。
+  // タイトルは整形のたびに提案し直す(追記で内容が変わってもタイトルが
+  // 古いままにならないように)。提案が空か現状と同じなら触らない。
   function pickTitle(currentTitle, suggested) {
-    if (currentTitle.trim() !== "") return null;
     const t = suggested.trim();
+    if (t === currentTitle.trim()) return null;
     return t === "" ? null : t;
   }
 
@@ -386,8 +387,9 @@
     return before !== after;
   }
 
-  function changesLabel(count) {
-    return count > 0 ? `${count}箇所を修正しました` : "直すところはありませんでした";
+  function changesLabel(count, titleChanged = false) {
+    const base = count > 0 ? `${count}箇所を修正しました` : "直すところはありませんでした";
+    return titleChanged ? base + "。タイトルを更新しました" : base;
   }
 
   async function requestProofread(body) {
@@ -457,8 +459,7 @@
   }
 
   let proofreadBusy = false;
-  let proofreadUndoBody = null;
-  let proofreadUndoTranslation = null;
+  let proofreadUndo = null; // 整形前の { body, title, translation }
   let proofreadUndoTimer = null;
 
   function showProofBar(text, canUndo, isError) {
@@ -470,8 +471,7 @@
 
   function hideProofBar() {
     proofBar.hidden = true;
-    proofreadUndoBody = null;
-    proofreadUndoTranslation = null;
+    proofreadUndo = null;
   }
 
   function scheduleProofBarHide() {
@@ -480,12 +480,13 @@
   }
 
   function undoProofread() {
-    if (proofreadUndoBody === null) return;
-    bodyInput.value = proofreadUndoBody;
-    // 英訳も整形前のものに戻す
+    if (!proofreadUndo) return;
+    // 本文・タイトル・英訳をまとめて整形前に戻す(食い違ったまま残さない)
+    bodyInput.value = proofreadUndo.body;
+    titleInput.value = proofreadUndo.title;
     const memo = getMemo(selectedId);
     if (memo) {
-      memo.translation = proofreadUndoTranslation || "";
+      memo.translation = proofreadUndo.translation || "";
       renderTranslation(memo);
     }
     updateSelected();
@@ -518,28 +519,35 @@
       // 待っているあいだにユーザーが打ち直していたら、古い結果で上書きしない
       if (bodyInput.value !== sent || getMemo(selectedId) !== memo) return;
 
+      // 書き換える前の状態(元に戻す用のスナップショット)
+      const prevTitle = titleInput.value;
+      const prevTranslation = memo.translation || "";
+
       let applied = false;
       if (bodyChanged(sent, result.corrected)) {
         bodyInput.value = result.corrected;
-        proofreadUndoBody = sent;
-        proofreadUndoTranslation = memo.translation || "";
         applied = true;
       }
-      const newTitle = pickTitle(titleInput.value, result.title);
+      // タイトルは毎回提案し直す(元に戻すで戻せる)
+      const newTitle = pickTitle(prevTitle, result.title);
       if (newTitle) {
         titleInput.value = newTitle;
         applied = true;
       }
       // 英訳はメモに保存する(端末をまたいで同期され、iOS版の長押しにも出る)
       const newTranslation = result.translation.trim();
-      if (newTranslation && newTranslation !== (memo.translation || "")) {
+      if (newTranslation && newTranslation !== prevTranslation) {
         memo.translation = newTranslation;
         applied = true;
+      }
+      // 本文かタイトルを書き換えたときだけ「元に戻す」を出す
+      if (bodyChanged(sent, result.corrected) || newTitle) {
+        proofreadUndo = { body: sent, title: prevTitle, translation: prevTranslation };
       }
       renderTranslation(memo);
       if (applied) updateSelected();
 
-      showProofBar(changesLabel(result.changes.length), proofreadUndoBody !== null, false);
+      showProofBar(changesLabel(result.changes.length, !!newTitle), proofreadUndo !== null, false);
       scheduleProofBarHide();
     } catch (e) {
       showProofBar(String(e?.message || e), false, true);
@@ -553,8 +561,7 @@
 
   function resetProofread() {
     clearTimeout(proofreadUndoTimer);
-    proofreadUndoBody = null;
-    proofreadUndoTranslation = null;
+    proofreadUndo = null;
     proofBar.hidden = true;
     translationPane.hidden = true;
     translationText.textContent = "";
