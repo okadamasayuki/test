@@ -333,7 +333,6 @@
   // 受け付けない世代なので、リクエストにこの2つを入れないこと(400になる)。
   const PROOFREAD_MODEL = "claude-haiku-4-5";
   const PROOFREAD_MAX_BODY_CHARS = 20000;
-  const PROOFREAD_UNDO_VISIBLE_MS = 12000;
 
   const PROOFREAD_SYSTEM_PROMPT =
     "あなたは日本語の編集者です。渡されたメモの本文について、次の作業をしてください。" +
@@ -460,7 +459,6 @@
 
   let proofreadBusy = false;
   let proofreadUndo = null; // 整形前の { body, title, translation }
-  let proofreadUndoTimer = null;
 
   function showProofBar(text, canUndo, isError) {
     proofBar.hidden = false;
@@ -472,11 +470,6 @@
   function hideProofBar() {
     proofBar.hidden = true;
     proofreadUndo = null;
-  }
-
-  function scheduleProofBarHide() {
-    clearTimeout(proofreadUndoTimer);
-    proofreadUndoTimer = setTimeout(hideProofBar, PROOFREAD_UNDO_VISIBLE_MS);
   }
 
   function undoProofread() {
@@ -507,7 +500,6 @@
     if (!sent.trim()) return;
     if (sent.trim().length > PROOFREAD_MAX_BODY_CHARS) {
       showProofBar("本文が長すぎて整形できません。", false, true);
-      scheduleProofBarHide();
       return;
     }
     proofreadBusy = true;
@@ -548,10 +540,8 @@
       if (applied) updateSelected();
 
       showProofBar(changesLabel(result.changes.length, !!newTitle), proofreadUndo !== null, false);
-      scheduleProofBarHide();
     } catch (e) {
       showProofBar(String(e?.message || e), false, true);
-      scheduleProofBarHide();
     } finally {
       proofreadBusy = false;
       proofreadBtn.disabled = false;
@@ -560,7 +550,6 @@
   }
 
   function resetProofread() {
-    clearTimeout(proofreadUndoTimer);
     proofreadUndo = null;
     proofBar.hidden = true;
     translationPane.hidden = true;
@@ -3001,8 +2990,12 @@
   // --- Events ---
   newBtn.addEventListener("click", createMemo);
   deleteBtn.addEventListener("click", deleteSelected);
-  titleInput.addEventListener("input", updateSelected);
+  titleInput.addEventListener("input", () => {
+    if (proofreadUndo) hideProofBar();
+    updateSelected();
+  });
   bodyInput.addEventListener("input", () => {
+    if (proofreadUndo) hideProofBar();
     updateSelected();
     renderLinks();
   });
