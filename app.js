@@ -59,6 +59,7 @@
   const dueDate = document.getElementById("dueDate");
   const dueInfo = document.getElementById("dueInfo");
   const bodyInput = document.getElementById("bodyInput");
+  const copyBodyBtn = document.getElementById("copyBodyBtn");
   const proofBar = document.getElementById("proofBar");
   const proofBarText = document.getElementById("proofBarText");
   const proofBarUndo = document.getElementById("proofBarUndo");
@@ -2633,6 +2634,17 @@
     scheduleProofread();
   });
   proofBarUndo.addEventListener("click", undoProofread);
+  copyBodyBtn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(bodyInput.value);
+      copyBodyBtn.textContent = "✓ コピーしました";
+      setTimeout(() => {
+        copyBodyBtn.textContent = "コピー";
+      }, 2000);
+    } catch (e) {
+      alert("コピーできませんでした: " + (e?.message || e));
+    }
+  });
   autoProofreadCheck.addEventListener("change", () => {
     setProofreadEnabled(autoProofreadCheck.checked);
   });

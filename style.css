@@ -907,6 +907,21 @@ body {
   color: var(--text-muted);
 }
 
+.copy-body-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-right: 8px;
+  white-space: nowrap;
+}
+.copy-body-btn:hover {
+  background: var(--bg);
+}
+
 .delete-btn {
   border: 1px solid var(--border);
   background: transparent;
