@@ -59,6 +59,10 @@
   const dueDate = document.getElementById("dueDate");
   const dueInfo = document.getElementById("dueInfo");
   const bodyInput = document.getElementById("bodyInput");
+  const proofBar = document.getElementById("proofBar");
+  const proofBarText = document.getElementById("proofBarText");
+  const proofBarUndo = document.getElementById("proofBarUndo");
+  const autoProofreadCheck = document.getElementById("autoProofreadCheck");
   const deleteBtn = document.getElementById("deleteBtn");
   const savedLabel = document.getElementById("savedLabel");
   const countLabel = document.getElementById("countLabel");
@@ -310,6 +314,237 @@
   }
 
 
+
+
+  // --- 本文の自動整形(誤字脱字の修正 + タイトルの自動生成) ---
+  //
+  // iOSアプリの src/lib/proofreadContent.ts / proofread.ts と同じロジック。
+  // 入力が止まったら自動で走り、本文を直接書き換える。自動で課金され、かつ
+  // ユーザーの文章を書き換えるので、暴走しないための判定を持つ:
+  //  1. 整形後の本文でまた走る無限ループ  → 直前の整形結果と同じなら走らない
+  //  2. 書きかけの短文を勝手に直される    → 一定の長さに満たなければ走らない
+  //  3. 変えていないのに何度も課金される  → 前回送った本文と同じなら走らない
+
+  const PROOFREAD_ENABLED_STORAGE = "memo-app.auto-proofread.v1";
+  const PROOFREAD_MODEL = "claude-opus-4-8";
+  const PROOFREAD_MIN_BODY_CHARS = 20;
+  const PROOFREAD_MAX_BODY_CHARS = 20000;
+  const PROOFREAD_IDLE_MS = 3000;
+  const PROOFREAD_UNDO_VISIBLE_MS = 12000;
+
+  const PROOFREAD_SYSTEM_PROMPT =
+    "あなたは日本語の校正者です。渡されたメモの本文について、次の作業をしてください。" +
+    "\n\n" +
+    "1. corrected: 誤字・脱字・変換ミス・明らかな入力ミスだけを直した本文を返す。" +
+    "内容の追加や削除、語順や言い回しの変更、要約は禁止です。" +
+    "改行・箇条書き・記号・全角半角などの書式はそのまま保ってください。" +
+    "直すところが無ければ、渡された本文をそのまま返します。" +
+    "\n\n" +
+    "2. changes: 直した箇所を before/after の組で列挙する。直していなければ空配列。" +
+    "\n\n" +
+    "3. title: 本文の内容を表す20文字以内の短いタイトルを1つ考える。" +
+    "本文が意味をなさない場合は空文字にする。";
+
+  const PROOFREAD_SCHEMA = {
+    type: "object",
+    properties: {
+      corrected: { type: "string" },
+      changes: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: { before: { type: "string" }, after: { type: "string" } },
+          required: ["before", "after"],
+          additionalProperties: false,
+        },
+      },
+      title: { type: "string" },
+    },
+    required: ["corrected", "changes", "title"],
+    additionalProperties: false,
+  };
+
+  const EMPTY_PROOFREAD_MEMORY = { lastSent: null, lastCorrected: null };
+
+  function shouldRunProofread(body, memory) {
+    const trimmed = body.trim();
+    if (trimmed.length < PROOFREAD_MIN_BODY_CHARS) return false;
+    if (trimmed.length > PROOFREAD_MAX_BODY_CHARS) return false;
+    if (memory.lastCorrected !== null && body === memory.lastCorrected) return false;
+    if (memory.lastSent !== null && body === memory.lastSent) return false;
+    return true;
+  }
+
+  // タイトルは空のときだけ入れる。自分で付けたタイトルを消さない。
+  function pickTitle(currentTitle, suggested) {
+    if (currentTitle.trim() !== "") return null;
+    const t = suggested.trim();
+    return t === "" ? null : t;
+  }
+
+  function bodyChanged(before, after) {
+    return before !== after;
+  }
+
+  function changesLabel(count) {
+    return count > 0 ? `${count}箇所を修正しました` : "誤字は見つかりませんでした";
+  }
+
+  // 既定はオン。切りたければ設定から。
+  function isProofreadEnabled() {
+    return localStorage.getItem(PROOFREAD_ENABLED_STORAGE) !== "off";
+  }
+
+  function setProofreadEnabled(on) {
+    localStorage.setItem(PROOFREAD_ENABLED_STORAGE, on ? "on" : "off");
+  }
+
+  async function requestProofread(body) {
+    const apiKey = getAnthropicKey();
+    if (!apiKey) throw new Error("APIキーが設定されていません（⚙から設定）");
+
+    let res;
+    try {
+      res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model: PROOFREAD_MODEL,
+          max_tokens: 8192,
+          thinking: { type: "adaptive" },
+          output_config: {
+            effort: "low",
+            format: { type: "json_schema", schema: PROOFREAD_SCHEMA },
+          },
+          system: PROOFREAD_SYSTEM_PROMPT,
+          messages: [{ role: "user", content: body }],
+        }),
+      });
+    } catch (e) {
+      throw new Error("ネットワークに接続できません。");
+    }
+
+    if (!res.ok) {
+      let apiMessage = "";
+      try {
+        apiMessage = (await res.json()).error?.message || "";
+      } catch (e) {
+        /* JSONでないエラー本文は無視 */
+      }
+      throw new Error(summaryStatusErrMsg(res.status, apiMessage));
+    }
+
+    const data = await res.json();
+    if (data.stop_reason === "refusal") throw new Error("この本文は整形できませんでした。");
+    // 本文が途中で切れた結果で上書きすると文章が失われる
+    if (data.stop_reason === "max_tokens") throw new Error("本文が長すぎて整形できませんでした。");
+
+    const raw = data.content
+      .filter((b) => b.type === "text")
+      .map((b) => b.text || "")
+      .join("");
+
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (e) {
+      throw new Error("整形の結果を解釈できませんでした。");
+    }
+    if (typeof parsed.corrected !== "string") {
+      throw new Error("整形の結果を解釈できませんでした。");
+    }
+    return { corrected: parsed.corrected, changes: parsed.changes || [], title: parsed.title || "" };
+  }
+
+  let proofreadMemory = { ...EMPTY_PROOFREAD_MEMORY };
+  let proofreadTimer = null;
+  let proofreadBusy = false;
+  let proofreadUndoBody = null;
+  let proofreadUndoTimer = null;
+
+  function showProofBar(text, canUndo, isError) {
+    proofBar.hidden = false;
+    proofBarText.textContent = text;
+    proofBarText.classList.toggle("error", !!isError);
+    proofBarUndo.hidden = !canUndo;
+  }
+
+  function hideProofBar() {
+    proofBar.hidden = true;
+    proofreadUndoBody = null;
+  }
+
+  function scheduleProofBarHide() {
+    clearTimeout(proofreadUndoTimer);
+    proofreadUndoTimer = setTimeout(hideProofBar, PROOFREAD_UNDO_VISIBLE_MS);
+  }
+
+  function undoProofread() {
+    if (proofreadUndoBody === null) return;
+    // 戻した本文でまた整形が走らないよう、送信済みとして記録しておく
+    proofreadMemory = { lastSent: proofreadUndoBody, lastCorrected: proofreadUndoBody };
+    bodyInput.value = proofreadUndoBody;
+    updateSelected();
+    hideProofBar();
+  }
+
+  async function runProofread() {
+    const memo = getMemo(selectedId);
+    if (!memo) return;
+    const sent = bodyInput.value;
+    proofreadBusy = true;
+    showProofBar("整形しています…", false, false);
+    proofreadMemory = { ...proofreadMemory, lastSent: sent };
+    try {
+      const result = await requestProofread(sent);
+      // 待っているあいだにユーザーが打ち直していたら、古い結果で上書きしない
+      if (bodyInput.value !== sent || getMemo(selectedId) !== memo) return;
+
+      proofreadMemory = { lastSent: sent, lastCorrected: result.corrected };
+
+      let applied = false;
+      if (bodyChanged(sent, result.corrected)) {
+        bodyInput.value = result.corrected;
+        proofreadUndoBody = sent;
+        applied = true;
+      }
+      const newTitle = pickTitle(titleInput.value, result.title);
+      if (newTitle) {
+        titleInput.value = newTitle;
+        applied = true;
+      }
+      if (applied) updateSelected();
+
+      showProofBar(changesLabel(result.changes.length), proofreadUndoBody !== null, false);
+      scheduleProofBarHide();
+    } catch (e) {
+      showProofBar(String(e?.message || e), false, true);
+      scheduleProofBarHide();
+    } finally {
+      proofreadBusy = false;
+    }
+  }
+
+  function resetProofread() {
+    clearTimeout(proofreadTimer);
+    clearTimeout(proofreadUndoTimer);
+    proofreadMemory = { ...EMPTY_PROOFREAD_MEMORY };
+    proofreadUndoBody = null;
+    proofBar.hidden = true;
+  }
+
+  // 入力が止まってから走らせる
+  function scheduleProofread() {
+    clearTimeout(proofreadTimer);
+    if (proofreadBusy || !getAnthropicKey() || !isProofreadEnabled()) return;
+    if (!shouldRunProofread(bodyInput.value, proofreadMemory)) return;
+    proofreadTimer = setTimeout(runProofread, PROOFREAD_IDLE_MS);
+  }
 
   // --- AI意味検索 ---
   //
@@ -1282,6 +1517,8 @@
 
   function selectMemo(id) {
     discardFreshIfEmpty(id);
+    // 別のメモに移ったら、前のメモの整形状態を持ち越さない
+    resetProofread();
     // スマホではエディタが全画面になるため、ブラウザの「戻る」で一覧に
     // 戻れるよう履歴を1つ積む（iOSの端からの戻るスワイプにも対応）
     if (isMobile() && !(history.state && history.state.memoOpen)) {
@@ -2182,6 +2419,10 @@
   }
 
   // --- Sync modal ---
+  function updateAutoProofreadCheck() {
+    autoProofreadCheck.checked = isProofreadEnabled();
+  }
+
   function updateAiSearchBtn() {
     aiSearchBtn.hidden = !(currentTab === "memos" && !!getAnthropicKey() && !!searchQuery.trim());
   }
@@ -2381,7 +2622,14 @@
   newBtn.addEventListener("click", createMemo);
   deleteBtn.addEventListener("click", deleteSelected);
   titleInput.addEventListener("input", updateSelected);
-  bodyInput.addEventListener("input", updateSelected);
+  bodyInput.addEventListener("input", () => {
+    updateSelected();
+    scheduleProofread();
+  });
+  proofBarUndo.addEventListener("click", undoProofread);
+  autoProofreadCheck.addEventListener("change", () => {
+    setProofreadEnabled(autoProofreadCheck.checked);
+  });
 
   dueSelect.addEventListener("change", () => {
     const v = dueSelect.value;

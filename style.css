@@ -606,6 +606,46 @@ body {
   padding: 4px 8px;
 }
 
+/* --- 本文の自動整形バー --- */
+.proof-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 20px;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--sidebar-bg);
+  border-top: 1px solid var(--border);
+}
+.proof-bar span {
+  flex: 1;
+}
+.proof-bar span.error {
+  color: var(--danger);
+}
+.proof-bar-undo {
+  background: none;
+  border: none;
+  color: var(--accent-hover);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.modal-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.modal-check input {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
 /* --- 検索のヒット箇所の蛍光 --- */
 .memo-item mark {
   background: #ffe680;
