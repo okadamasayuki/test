@@ -2328,6 +2328,23 @@
   // 大きいものを送ると高額になる。上限を超えたら要約自体を断る。
   const MAX_PDF_BYTES = 5 * 1024 * 1024; // 5MB
 
+  // PDF要約の費用上限。送信前に count_tokens(無料)で入力トークンを数え、
+  // 見積もりが上限を超えたらAPIを呼ばずに断る。
+  // 円換算は概算の固定レート(入力単価 $5/100万トークン、$1=150円)。
+  const MAX_SUMMARY_COST_YEN = 10;
+  const SUMMARY_INPUT_USD_PER_MTOK = 5;
+  const USD_JPY = 150;
+
+  function estimateSummaryYen(inputTokens) {
+    return (inputTokens * SUMMARY_INPUT_USD_PER_MTOK * USD_JPY) / 1000000;
+  }
+
+  function pdfCostError(inputTokens) {
+    const yen = estimateSummaryYen(inputTokens);
+    if (yen <= MAX_SUMMARY_COST_YEN) return null;
+    return `このPDFの要約には約${Math.ceil(yen)}円かかるため中止しました（上限${MAX_SUMMARY_COST_YEN}円）。`;
+  }
+
   function summarySizeError(meta) {
     if (previewKind(meta) === "pdf" && meta.size > MAX_PDF_BYTES) {
       const mb = (meta.size / 1024 / 1024).toFixed(1);
@@ -2416,6 +2433,43 @@
     const sizeErr = summarySizeError(meta);
     if (sizeErr) throw new Error(sizeErr);
     const content = await buildSummaryContent(meta, base64);
+    const requestBody = {
+      model: SUMMARY_MODEL,
+      system: SUMMARY_SYSTEM_PROMPT,
+      messages: [{ role: "user", content }],
+    };
+
+    // PDFは課金が高くつきやすいので、送信前に count_tokens(無料)で
+    // 入力トークンを数え、見積もりが上限(10円)を超えたら中止する
+    if (previewKind(meta) === "pdf") {
+      let countRes;
+      try {
+        countRes = await fetch("https://api.anthropic.com/v1/messages/count_tokens", {
+          method: "POST",
+          headers: {
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+            "anthropic-dangerous-direct-browser-access": "true",
+          },
+          body: JSON.stringify(requestBody),
+        });
+      } catch (e) {
+        throw new Error("ネットワークに接続できません。通信環境を確認してください。");
+      }
+      if (!countRes.ok) {
+        let apiMessage = "";
+        try {
+          apiMessage = (await countRes.json()).error?.message || "";
+        } catch (e) {
+          /* JSONでないエラー本文は無視 */
+        }
+        throw new Error(summaryStatusErrMsg(countRes.status, apiMessage));
+      }
+      const counted = await countRes.json();
+      const costErr = pdfCostError(counted.input_tokens);
+      if (costErr) throw new Error(costErr);
+    }
 
     let res;
     try {
@@ -2429,12 +2483,10 @@
           "anthropic-dangerous-direct-browser-access": "true",
         },
         body: JSON.stringify({
-          model: SUMMARY_MODEL,
+          ...requestBody,
           max_tokens: 1024,
           thinking: { type: "adaptive" },
           output_config: { effort: "low" },
-          system: SUMMARY_SYSTEM_PROMPT,
-          messages: [{ role: "user", content }],
         }),
       });
     } catch (e) {
