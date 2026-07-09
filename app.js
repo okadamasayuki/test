@@ -36,6 +36,10 @@
   const memoList = document.getElementById("memoList");
   const searchInput = document.getElementById("searchInput");
   const sortDueBtn = document.getElementById("sortDueBtn");
+  const aiSearchBtn = document.getElementById("aiSearchBtn");
+  const aiBar = document.getElementById("aiBar");
+  const aiBarText = document.getElementById("aiBarText");
+  const aiBarClose = document.getElementById("aiBarClose");
   const newBtn = document.getElementById("newBtn");
   const selectBtn = document.getElementById("selectBtn");
   const selectBar = document.getElementById("selectBar");
@@ -305,23 +309,395 @@
     });
   }
 
-  function filteredMemos() {
-    const q = searchQuery.trim().toLowerCase();
-    let list = sortedMemos();
-    if (q) {
-      list = list.filter(
-        (m) =>
-          m.title.toLowerCase().includes(q) ||
-          m.body.toLowerCase().includes(q)
-      );
-    }
-    return list;
+
+
+  // --- AI意味検索 ---
+  //
+  // ベクトル検索ではない。生きているメモの本文をまとめて1回のリクエストで送り、
+  // Claudeに全文を読ませて選ばせる(総当たり)。「どのメモが該当するか」だけでなく
+  // 「本文のどの一文が根拠か」を逐語で返させ、その一文を蛍光する。
+  // iOSアプリの src/lib/aiSearchContent.ts / aiSearch.ts と同じロジック。
+
+  const AI_MAX_MEMOS = 80;
+  const AI_MAX_TOTAL_CHARS = 100000;
+  // 1件あたりの上限。これが無いと、巨大なメモ1件が総量を食い潰して
+  // 以降のメモが1件も送られなくなる。
+  const AI_MAX_MEMO_CHARS = 4000;
+
+  const AI_SEARCH_SYSTEM_PROMPT =
+    "あなたはメモ検索の補助です。ユーザーの検索語に、意味の上で関連するメモを選んでください。" +
+    "文字列が一致していなくても、内容が該当すれば選びます（例:「お金の話」→ 金額や費用が書かれたメモ）。" +
+    "関連しないメモは選ばないでください。該当が無ければ空の配列を返します。" +
+    "各メモについて quote には、そのメモの title か body から根拠となる一文を" +
+    "一字一句そのまま抜き出してください。要約・言い換え・省略記号の付加は禁止です。" +
+    "関連度の高い順に並べてください。";
+
+  const AI_SEARCH_SCHEMA = {
+    type: "object",
+    properties: {
+      matches: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: { id: { type: "string" }, quote: { type: "string" } },
+          required: ["id", "quote"],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ["matches"],
+    additionalProperties: false,
+  };
+
+  let aiResult = null; // { query, hits: [{memo, preview, quoteFound}], truncated }
+  let aiBusy = false;
+  const aiCache = new Map();
+
+  function bodyForSearch(body) {
+    return body.length <= AI_MAX_MEMO_CHARS ? body : body.slice(0, AI_MAX_MEMO_CHARS);
   }
 
+  function buildAiPayload(memosToSend) {
+    return memosToSend.map((m) => ({ id: m.id, title: m.title, body: bodyForSearch(m.body) }));
+  }
+
+  function selectMemosToSend(list) {
+    const sorted = [...list].sort((a, b) => b.updatedAt - a.updatedAt);
+    const sent = [];
+    let chars = 0;
+    for (const m of sorted) {
+      if (sent.length >= AI_MAX_MEMOS) break;
+      const size = m.title.length + bodyForSearch(m.body).length;
+      if (chars + size > AI_MAX_TOTAL_CHARS) break;
+      chars += size;
+      sent.push(m);
+    }
+    return { sent, truncated: list.length - sent.length };
+  }
+
+  // モデルの出力を信用しきらない: 存在しないid・重複idは捨てる
+  function buildHits(memosSent, matches) {
+    const byId = new Map(memosSent.map((m) => [m.id, m]));
+    const seen = new Set();
+    const hits = [];
+    for (const { id, quote } of matches) {
+      const memo = byId.get(id);
+      if (!memo || seen.has(id)) continue;
+      seen.add(id);
+
+      const inBody = locateQuote(memo.body, quote);
+      if (inBody) {
+        hits.push({ memo, preview: makeSnippet(memo.body, [inBody]), quoteFound: true });
+        continue;
+      }
+      if (locateQuote(memo.title, quote)) {
+        hits.push({ memo, preview: makeSnippet(memo.body, []), quoteFound: true });
+        continue;
+      }
+      // 言い換えられて本文に無い。落とさず、返ってきた一文をそのまま見せる。
+      hits.push({ memo, preview: { text: quote.trim(), ranges: [] }, quoteFound: false });
+    }
+    return hits;
+  }
+
+  async function requestAiSearch(query, list) {
+    const apiKey = getAnthropicKey();
+    if (!apiKey) throw new Error("APIキーが設定されていません（⚙から設定）");
+    const { sent, truncated } = selectMemosToSend(list);
+    if (sent.length === 0) return { query, hits: [], truncated };
+
+    let res;
+    try {
+      res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model: SUMMARY_MODEL,
+          max_tokens: 2048,
+          thinking: { type: "adaptive" },
+          output_config: {
+            effort: "low",
+            format: { type: "json_schema", schema: AI_SEARCH_SCHEMA },
+          },
+          system: AI_SEARCH_SYSTEM_PROMPT,
+          messages: [
+            {
+              role: "user",
+              content: `検索語: ${query}\n\nメモ一覧(JSON):\n${JSON.stringify(buildAiPayload(sent))}`,
+            },
+          ],
+        }),
+      });
+    } catch (e) {
+      throw new Error("ネットワークに接続できません。通信環境を確認してください。");
+    }
+
+    if (!res.ok) {
+      let apiMessage = "";
+      try {
+        apiMessage = (await res.json()).error?.message || "";
+      } catch (e) {
+        /* JSONでないエラー本文は無視 */
+      }
+      throw new Error(summaryStatusErrMsg(res.status, apiMessage));
+    }
+
+    const data = await res.json();
+    if (data.stop_reason === "refusal") {
+      throw new Error("この検索語では実行できませんでした。");
+    }
+    const raw = data.content
+      .filter((b) => b.type === "text")
+      .map((b) => b.text || "")
+      .join("");
+
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (e) {
+      throw new Error("AI検索の結果を解釈できませんでした。もう一度お試しください。");
+    }
+    return { query, hits: buildHits(sent, parsed.matches || []), truncated };
+  }
+
+  function memoFingerprint() {
+    const live = visibleMemos();
+    return `${live.length}:${live.reduce((max, m) => Math.max(max, m.updatedAt), 0)}`;
+  }
+
+  function clearAiResult() {
+    aiResult = null;
+    aiBar.hidden = true;
+    renderList();
+  }
+
+  async function executeAiSearch() {
+    const query = searchQuery.trim();
+    if (!query || aiBusy || currentTab !== "memos" || !getAnthropicKey()) return;
+
+    const cacheKey = `${memoFingerprint()} ${query}`;
+    if (aiCache.has(cacheKey)) {
+      aiResult = aiCache.get(cacheKey);
+      showAiBar();
+      renderList();
+      return;
+    }
+
+    aiBusy = true;
+    aiBar.hidden = false;
+    aiBarText.textContent = "✨ AI検索を実行しています…";
+    aiBarClose.hidden = true;
+    try {
+      const result = await requestAiSearch(query, visibleMemos());
+      aiCache.set(cacheKey, result);
+      aiResult = result;
+      showAiBar();
+      renderList();
+    } catch (e) {
+      aiResult = null;
+      aiBarText.textContent = String(e?.message || e);
+      aiBarClose.hidden = false;
+      renderList();
+    } finally {
+      aiBusy = false;
+    }
+  }
+
+  function showAiBar() {
+    aiBar.hidden = false;
+    aiBarClose.hidden = false;
+    aiBarText.textContent =
+      `✨ AI検索: ${aiResult.query}` +
+      (aiResult.truncated > 0 ? `（更新の古い${aiResult.truncated}件は対象外）` : "");
+  }
+
+  // --- 検索の正規化・マッチ・抜粋 ---
+  //
+  // iOSアプリの src/lib/search.ts と同じロジック。出力が一致することを
+  // スクリプトで突き合わせている。片方だけ直さないこと。
+  //
+  // 蛍光するには「正規化後の一致位置」を「元テキストの位置」に戻す必要がある。
+  // ところが正規化は文字数を変える:
+  //   "ﾊﾟ" (2文字) → NFKC → "パ" (1文字)   縮む
+  //   "㍿" (1文字) → NFKC → "株式会社"      伸びる
+  //   "İ".toLowerCase()                    → 2文字に伸びる
+  // そのため単純な1対1の対応表では足りず、正規化後の各文字が元テキストの
+  // どの範囲から来たかを starts/ends で持つ。
+
+  const HALF_DAKUTEN = "ﾞ";
+  const HALF_HANDAKUTEN = "ﾟ";
+
+  function katakanaToHiragana(ch) {
+    const c = ch.codePointAt(0);
+    if (c !== undefined && c >= 0x30a1 && c <= 0x30f6) return String.fromCodePoint(c - 0x60);
+    return ch;
+  }
+
+  // 1文字→1文字にならない小文字化(İ など)は諦めて元の文字を保つ。
+  // 崩れた対応表で蛍光位置がずれるより、その文字が一致しないほうがましなため。
+  function safeLower(ch) {
+    const lower = ch.toLowerCase();
+    return [...lower].length === 1 ? lower : ch;
+  }
+
+  function fold(ch) {
+    return safeLower(katakanaToHiragana(ch));
+  }
+
+  function normalizeWithMap(text) {
+    let normalized = "";
+    const starts = [];
+    const ends = [];
+    let i = 0;
+    while (i < text.length) {
+      const cp = text.codePointAt(i);
+      if (cp === undefined) break;
+      const ch = String.fromCodePoint(cp);
+      let src = ch;
+      let consumed = ch.length;
+
+      // 半角カナ + 濁点/半濁点 はペアで正規化しないと結合しない
+      const next = text[i + ch.length];
+      if (next === HALF_DAKUTEN || next === HALF_HANDAKUTEN) {
+        src = ch + next;
+        consumed = ch.length + 1;
+      }
+
+      const nfkc = src.normalize("NFKC");
+      for (const outCh of nfkc) {
+        for (const folded of fold(outCh)) {
+          normalized += folded;
+          starts.push(i);
+          ends.push(i + consumed);
+        }
+      }
+      i += consumed;
+    }
+    return { normalized, starts, ends };
+  }
+
+  function normalizeText(text) {
+    return normalizeWithMap(text).normalized;
+  }
+
+  function searchTerms(query) {
+    return normalizeText(query)
+      .split(/[\s　]+/)
+      .filter((t) => t.length > 0);
+  }
+
+  function mergeRanges(ranges) {
+    if (ranges.length === 0) return [];
+    const sorted = [...ranges].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const out = [sorted[0]];
+    for (const [s, e] of sorted.slice(1)) {
+      const last = out[out.length - 1];
+      if (s <= last[1]) last[1] = Math.max(last[1], e);
+      else out.push([s, e]);
+    }
+    return out;
+  }
+
+  function findRanges(text, terms) {
+    if (terms.length === 0) return [];
+    const { normalized, starts, ends } = normalizeWithMap(text);
+    const ranges = [];
+    for (const term of terms) {
+      let from = 0;
+      for (;;) {
+        const hit = normalized.indexOf(term, from);
+        if (hit < 0) break;
+        ranges.push([starts[hit], ends[hit + term.length - 1]]);
+        from = hit + term.length;
+      }
+    }
+    return mergeRanges(ranges);
+  }
+
+  function matchesAll(text, terms) {
+    if (terms.length === 0) return true;
+    const { normalized } = normalizeWithMap(text);
+    return terms.every((t) => normalized.includes(t));
+  }
+
+  const SNIPPET_BEFORE = 12;
+  const SNIPPET_AFTER = 48;
+
+  // 改行を空白1文字に置き換える。文字数が変わらないので範囲をそのまま使える。
+  function flatten(body) {
+    return body.replace(/\n/g, " ");
+  }
+
+  function makeSnippet(body, ranges) {
+    if (ranges.length === 0) {
+      const firstLine = body.split("\n").find((l) => l.trim() !== "") || "";
+      return { text: firstLine.trim(), ranges: [] };
+    }
+    const flat = flatten(body);
+    const [hitStart, hitEnd] = ranges[0];
+    const start = Math.max(0, hitStart - SNIPPET_BEFORE);
+    const end = Math.min(flat.length, hitEnd + SNIPPET_AFTER);
+    const prefix = start > 0 ? "…" : "";
+    const suffix = end < flat.length ? "…" : "";
+    const text = prefix + flat.slice(start, end) + suffix;
+    const offset = prefix.length - start;
+    const out = ranges
+      .filter(([s, e]) => s >= start && e <= end)
+      .map(([s, e]) => [s + offset, e + offset]);
+    return { text, ranges: out };
+  }
+
+  // Claudeが返した根拠の一文が、元テキストのどこにあるかを探す。
+  function locateQuote(text, quote) {
+    const trimmed = quote.trim();
+    if (!trimmed) return null;
+    const direct = text.indexOf(trimmed);
+    if (direct >= 0) return [direct, direct + trimmed.length];
+    const { normalized, starts, ends } = normalizeWithMap(text);
+    const needle = normalizeText(trimmed);
+    if (!needle) return null;
+    const hit = normalized.indexOf(needle);
+    if (hit < 0) return null;
+    return [starts[hit], ends[hit + needle.length - 1]];
+  }
+
+  // ローカル検索とAI検索のどちらでも、行に渡す形(抜粋+蛍光範囲)に揃える
+  function memoRows() {
+    if (aiResult) {
+      return aiResult.hits.map((h) => ({
+        memo: h.memo,
+        titleRanges: [],
+        preview: h.preview,
+      }));
+    }
+    const terms = searchTerms(searchQuery.trim());
+    const list = sortedMemos();
+    if (terms.length === 0) {
+      return list.map((m) => ({ memo: m, titleRanges: [], preview: makeSnippet(m.body, []) }));
+    }
+    return list
+      .filter((m) => matchesAll(m.title, terms) || matchesAll(m.body, terms))
+      .map((m) => ({
+        memo: m,
+        titleRanges: findRanges(m.title, terms),
+        preview: makeSnippet(m.body, findRanges(m.body, terms)),
+      }));
+  }
+
+  function filteredMemos() {
+    return memoRows().map((r) => r.memo);
+  }
+
+  // ファイルは名前しか持たないのでAI検索の対象外。ローカル検索のみ。
   function filteredFiles() {
-    const q = searchQuery.trim().toLowerCase();
+    const terms = searchTerms(searchQuery.trim());
     let list = [...filesMeta].sort((a, b) => b.createdAt - a.createdAt);
-    if (q) list = list.filter((f) => f.name.toLowerCase().includes(q));
+    if (terms.length > 0) list = list.filter((f) => matchesAll(f.name, terms));
     return list;
   }
 
@@ -550,7 +926,26 @@
   }
 
   // --- Rendering ---
-  function buildRow({ id, titleText, previewText, dateText, selected, draggable, onTap, onDelete }) {
+  // 指定範囲だけ <mark> で包む。本文はユーザー入力なので必ずエスケープしてから
+  // 挿し込む(innerHTMLに生データを入れないこと)。
+  function fillHighlighted(el, text, ranges) {
+    el.textContent = "";
+    if (!ranges || ranges.length === 0) {
+      el.textContent = text;
+      return;
+    }
+    let cursor = 0;
+    for (const [start, end] of ranges) {
+      if (start > cursor) el.appendChild(document.createTextNode(text.slice(cursor, start)));
+      const mark = document.createElement("mark");
+      mark.textContent = text.slice(start, end);
+      el.appendChild(mark);
+      cursor = end;
+    }
+    if (cursor < text.length) el.appendChild(document.createTextNode(text.slice(cursor)));
+  }
+
+  function buildRow({ id, titleText, previewText, dateText, selected, draggable, onTap, onDelete, titleRanges, previewRanges }) {
     const li = document.createElement("li");
     li.dataset.id = id;
     li.className =
@@ -560,11 +955,11 @@
 
     const title = document.createElement("div");
     title.className = "memo-title";
-    title.textContent = titleText;
+    fillHighlighted(title, titleText, titleRanges);
 
     const preview = document.createElement("div");
     preview.className = "memo-preview";
-    preview.textContent = previewText;
+    fillHighlighted(preview, previewText, previewRanges);
 
     const date = document.createElement("div");
     date.className = "memo-date";
@@ -676,16 +1071,19 @@
     openSwipeEl = null;
 
     if (currentTab === "memos") {
-      const list = filteredMemos();
-      const canDrag = !selectMode && !searchQuery.trim();
-      list.forEach((m) => {
+      const rows = memoRows();
+      // 検索中(ローカル/AI問わず)と選択モード中は並び替え無効
+      const canDrag = !selectMode && !searchQuery.trim() && !aiResult;
+      rows.forEach(({ memo: m, titleRanges, preview }) => {
         memoList.appendChild(
           buildRow({
             id: m.id,
             draggable: canDrag,
             chip: dueChip(m.due),
             titleText: m.title.trim() || "無題のメモ",
-            previewText: m.body.trim().split("\n")[0] || "本文なし",
+            titleRanges: m.title.trim() ? titleRanges : [],
+            previewText: preview.text || m.body.trim().split("\n")[0] || "本文なし",
+            previewRanges: preview.ranges,
             dateText: formatDate(m.updatedAt),
             selected: m.id === selectedId,
             onTap: () => selectMemo(m.id),
@@ -694,8 +1092,8 @@
         );
       });
       const total = visibleMemos().length;
-      countLabel.textContent = searchQuery.trim() && total > 0
-        ? `${list.length} / ${total} 件`
+      countLabel.textContent = (searchQuery.trim() || aiResult) && total > 0
+        ? `${rows.length} / ${total} 件`
         : `${total} 件のメモ`;
       updateSelectBar();
       return;
@@ -829,6 +1227,12 @@
     try {
       localStorage.setItem(TAB_KEY, tab);
     } catch (e) {}
+    // ファイルタブはAI検索の対象外。移ったら結果を解除する。
+    if (tab !== "memos") {
+      aiResult = null;
+      aiBar.hidden = true;
+    }
+    updateAiSearchBtn();
     tabMemos.classList.toggle("active", tab === "memos");
     tabFiles.classList.toggle("active", tab === "files");
     newBtn.hidden = tab !== "memos";
@@ -1778,6 +2182,10 @@
   }
 
   // --- Sync modal ---
+  function updateAiSearchBtn() {
+    aiSearchBtn.hidden = !(currentTab === "memos" && !!getAnthropicKey() && !!searchQuery.trim());
+  }
+
   function updateAnthropicKeyState() {
     anthropicKeyState.textContent = getAnthropicKey() ? "・設定済み" : "";
     anthropicKeyInput.placeholder = getAnthropicKey()
@@ -2006,8 +2414,20 @@
   });
   searchInput.addEventListener("input", (e) => {
     searchQuery = e.target.value;
+    // 検索語を変えたらAI結果は無効になる(古い結果を残さない)
+    aiResult = null;
+    aiBar.hidden = true;
+    updateAiSearchBtn();
     renderList();
   });
+  searchInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      executeAiSearch();
+    }
+  });
+  aiSearchBtn.addEventListener("click", executeAiSearch);
+  aiBarClose.addEventListener("click", clearAiResult);
 
   sortDueBtn.addEventListener("click", () => {
     resortByDue();
@@ -2064,6 +2484,7 @@
     }
     anthropicKeyInput.value = "";
     updateAnthropicKeyState();
+    updateAiSearchBtn();
   });
   syncModal.addEventListener("click", (e) => {
     if (e.target === syncModal) closeModal();

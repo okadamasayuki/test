@@ -28,7 +28,12 @@
       </div>
       <div class="search-box">
         <input type="search" id="searchInput" placeholder="メモを検索…" autocomplete="off">
+        <button id="aiSearchBtn" class="sort-due-btn" title="AIで意味検索（Enterでも実行）" hidden>✨</button>
         <button id="sortDueBtn" class="sort-due-btn" title="期日が近い順に並び替え">期日順</button>
+      </div>
+      <div id="aiBar" class="ai-bar" hidden>
+        <span id="aiBarText"></span>
+        <button id="aiBarClose" class="ai-bar-close" title="AI検索を解除">✕</button>
       </div>
       <ul id="memoList" class="memo-list"></ul>
       <div class="sidebar-footer">
