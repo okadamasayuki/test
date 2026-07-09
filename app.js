@@ -1560,6 +1560,8 @@
 
   function createMemo() {
     discardFreshIfEmpty(null);
+    // 新規メモは常にメモ一覧に作る(保存用タブで押した場合はタブも移す)
+    if (currentTab === "saved") switchTab("memos");
     const memo = {
       id: uid(),
       title: "",
@@ -1567,7 +1569,6 @@
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
-    if (currentTab === "saved") memo.saved = true;
     memos.push(memo);
     freshMemoId = memo.id;
     save();
